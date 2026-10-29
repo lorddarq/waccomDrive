@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>WaccomDrive preview check</title>
+<pre id="result">Checking…</pre><iframe title="Preview under test" src="index.html#Mapping" style="position:absolute;left:2000px;width:961px;height:723px;border:0"></iframe>
+<script>
+const expected={Overview:['Connection','Battery and charging','Live pen input'],Mapping:['Display','Tablet active area'],Pen:['Pressure sensitivity','Pen buttons'],Touch:['Surface touch','Palm rejection','Live status'],'Tablet buttons':['ExpressKeys','Touch ring'],Settings:['Installation and startup','Saved settings','Backup and restore','Defaults'],Help:['Set up tablet access','1. Allow tablet input','2. Allow pointer and button control','3. Return to WaccomDrive','Already enabled, but still blocked?']};
+const frame=document.querySelector('iframe'),result=document.querySelector('#result');
+frame.addEventListener('load',async()=>{try{
+ const doc=frame.contentDocument;await doc.fonts.ready;
+ const assert=(condition,message)=>{if(!condition)throw Error(message)};
+ for(const [name,sections] of Object.entries(expected)){
+  const target=[...doc.querySelectorAll('[role=tab]')].find(el=>el.textContent.trim()===name);assert(target,'Missing tab '+name);target.click();
+  assert(doc.querySelector('h1').textContent===name,'Heading mismatch '+name);
+  assert(doc.querySelectorAll('[role=tab][aria-selected=true]').length===1,'Selection mismatch '+name);
+  for(const section of sections)assert([...doc.querySelectorAll('h2')].some(el=>el.textContent===section),'Missing section '+section);
+  assert(doc.querySelector('.footer').getBoundingClientRect().bottom<=723,'Footer clipped '+name);
+ }
+ [...doc.querySelectorAll('[role=tab]')].find(el=>el.textContent==='Tablet buttons').click();
+ doc.querySelector('.diagram-key[data-key="8"]').click();assert(doc.querySelector('.target-label').textContent==='Target: ExpressKey 8','Diagram target mismatch');
+ doc.querySelector('.diagram-key[data-key="0"]').click();assert(doc.querySelector('.target-label').textContent==='Target: touch-ring center button','Center target mismatch');
+ const scroller=doc.querySelector('.tablet-form');scroller.scrollTop=scroller.scrollHeight;assert(scroller.scrollTop>0,'Tablet form does not scroll');
+ [...doc.querySelectorAll('[role=tab]')].find(el=>el.textContent==='Mapping').click();assert(doc.querySelector('.scroll').scrollTop===71,'Mapping capture position changed');
+ assert([...doc.images].every(img=>img.src.startsWith('data:')),'External image dependency');
+ result.textContent='PASS: seven tabs, all sections, selection, fixed footer, diagram targets, scrolling, and Mapping capture position.';
+}catch(error){result.textContent='FAIL: '+error.message;throw error;}});
+</script>
