@@ -1,0 +1,220 @@
+{
+  "version": 3,
+  "meta": {
+    "id": "project-mvtuzz6y-0",
+    "name": "",
+    "fps": 60,
+    "mode": "still",
+    "duration": 0.016666666666666666,
+    "stage": {
+      "cameraView": "front",
+      "cameraProjection": "perspective",
+      "aspect": "16:9",
+      "background": true,
+      "backdrop": "#092c65",
+      "backdropImage": null,
+      "grid": true,
+      "vignette": 31
+    },
+    "layout": {
+      "sceneWidthRatio": 0.52,
+      "perspectiveReferenceWidth": 610,
+      "viewAspect": 1.7777777777777777
+    },
+    "output": {
+      "still": {
+        "format": "png",
+        "scale": 2,
+        "quality": 92,
+        "pngOptimize": true,
+        "sharpen": 30
+      },
+      "video": {
+        "preset": "1080p",
+        "bitrate": "medium",
+        "sharpen": 0
+      }
+    }
+  },
+  "media": [
+    {
+      "id": "tablet.png:391994:1793306395981",
+      "name": "tablet.png",
+      "kind": "image",
+      "width": 1290,
+      "height": 870,
+      "duration": null
+    },
+    {
+      "id": "tablet.png:50435:1793306464054",
+      "name": "tablet.png",
+      "kind": "image",
+      "width": 371,
+      "height": 243,
+      "duration": null
+    },
+    {
+      "id": "Capture Panel - Figma.png:245530:1792612976828",
+      "name": "Capture Panel - Figma.png",
+      "kind": "image",
+      "width": 960,
+      "height": 1144,
+      "duration": null
+    },
+    {
+      "id": "Overview - USB.png:473062:1793297433782",
+      "name": "Overview - USB.png",
+      "kind": "image",
+      "width": 2883,
+      "height": 2169,
+      "duration": null
+    },
+    {
+      "id": "tablet.png:680235:1793306529904",
+      "name": "tablet.png",
+      "kind": "image",
+      "width": 1484,
+      "height": 970,
+      "duration": null
+    },
+    {
+      "id": "8283378b3e9d732eb0438be0eab42eea.jpg:36923:1793190653342",
+      "name": "8283378b3e9d732eb0438be0eab42eea.jpg",
+      "kind": "image",
+      "width": 1200,
+      "height": 1200,
+      "duration": null
+    },
+    {
+      "id": "Capture Panel - JSON.png:354545:1792612976828",
+      "name": "Capture Panel - JSON.png",
+      "kind": "image",
+      "width": 960,
+      "height": 1705,
+      "duration": null
+    },
+    {
+      "id": "72cc382b0372f381a9e7026f7909934d.jpg:345703:1790082013615",
+      "name": "72cc382b0372f381a9e7026f7909934d.jpg",
+      "kind": "image",
+      "width": 1086,
+      "height": 1448,
+      "duration": null
+    },
+    {
+      "id": "Capture Panel - Image - Isolated.png:251568:1792612976826",
+      "name": "Capture Panel - Image - Isolated.png",
+      "kind": "image",
+      "width": 960,
+      "height": 1150,
+      "duration": null
+    },
+    {
+      "id": "reveal.mp4:505989:1792616798735",
+      "name": "reveal.mp4",
+      "kind": "video",
+      "width": 824,
+      "height": 1200,
+      "duration": 2.733333
+    },
+    {
+      "id": "Grazy Capture UI.png:1615604:1792618972041",
+      "name": "Grazy Capture UI.png",
+      "kind": "image",
+      "width": 3576,
+      "height": 4020,
+      "duration": null
+    },
+    {
+      "id": "851cc148450679.5898b2f65dd53.webp:446814:1793193081724",
+      "name": "851cc148450679.5898b2f65dd53.webp",
+      "kind": "image",
+      "width": 1200,
+      "height": 1697,
+      "duration": null
+    },
+    {
+      "id": "cover.png:11804757:1793308450330",
+      "name": "cover.png",
+      "kind": "image",
+      "width": 7680,
+      "height": 4320,
+      "duration": null
+    }
+  ],
+  "tracks": [
+    {
+      "id": "track-mvtuzz6y-1",
+      "kind": "media",
+      "clips": [
+        {
+          "id": "clip-mvtuzz6y-2",
+          "mediaId": "cover.png:11804757:1793308450330",
+          "start": 0,
+          "end": 0.016666666666666666,
+          "trim": null,
+          "settings": {
+            "x": 28.879143962131586,
+            "y": -29.846854618420345,
+            "z": 6.275107764926848,
+            "panX": 29.3,
+            "panY": -10.3,
+            "panZ": 100,
+            "zoom": 1.25,
+            "blur": 30,
+            "perspective": 2400,
+            "exposure": 0.3,
+            "rounding": 0,
+            "deviceLightX": -3.1150660021551726,
+            "deviceLightY": 4.565046071774976,
+            "deviceLightZ": 2,
+            "mediaThickness": 7,
+            "mediaEdgeLighting": 70,
+            "border": 0,
+            "mediaRounding": 15,
+            "mediaBorder": 0,
+            "mediaBorderColor": "#74b7ff",
+            "mediaBorderOpacity": 100,
+            "focus": "MF",
+            "focusPoints": [
+              {
+                "id": "focus-1",
+                "position": {
+                  "x": 22.31687877686406,
+                  "y": 28.848299788227383
+                },
+                "size": 0.9,
+                "distance": 1.5005785064289037,
+                "distanceModel": "none"
+              }
+            ],
+            "autoFocusTarget": null,
+            "autoFocusAuthored": false,
+            "deviceDofSamples": 320,
+            "shadowColor": "#000000",
+            "shadowOpacity": 24,
+            "shadowBlur": 48,
+            "shadowDistance": -645,
+            "shadowOffsetX": 0,
+            "blurType": "lens",
+            "lensSamples": 96,
+            "lensSolvePasses": 3,
+            "chromatic": 0.12,
+            "bokeh": 100,
+            "focusDarken": 27,
+            "focusFalloff": 0,
+            "grain": 16,
+            "deviceLightIntensity": 1.2,
+            "deviceImageRotation": 0,
+            "deviceOrientation": "portrait",
+            "deviceModelId": "none",
+            "deviceScreenFit": "contain",
+            "deviceFocusOffset": 0,
+            "text": ""
+          },
+          "keyframes": {}
+        }
+      ]
+    }
+  ]
+}
