@@ -1,5 +1,7 @@
 # WaccomDrive
 
+![WaccomDrive tablet driver and settings app](previews/cover.png)
+
 A native macOS USB driver and settings app for the Wacom Intuos Pro Large PTH-851/K. No third-party dependencies or kernel extension.
 
 ## Features
