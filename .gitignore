@@ -1,0 +1,24 @@
+.DS_Store
+build/
+.swiftpm/
+.build/
+
+# Local automation and workspace configuration (no published CI for now).
+/.github/
+/.codex/
+
+# Local diagnostics; retain the documented regression fixtures.
+*.log
+/captures/*
+!/captures/first-session-excerpt.txt
+!/captures/pen-buttons.txt
+!/captures/touch-ring.txt
+!/captures/touch-surface-retry.txt
+
+# Signing credentials and local secrets must stay outside source control.
+*.p12
+*.pfx
+*.key
+.env
+.env.*
+!.env.example

@@ -1,0 +1,12 @@
+#!/bin/bash
+set -euo pipefail
+APP="${3:-/}/Applications/WaccomDrive.app"
+if [[ -L "$APP" ]]; then echo 'Refusing to replace a symbolic-link app.' >&2; exit 1; fi
+if [[ -e "$APP" ]]; then
+    ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist")"
+    [[ "$ID" == local.waccomDrive ]] || { echo 'Another app occupies /Applications/WaccomDrive.app; installation stopped.' >&2; exit 1; }
+fi
+if pgrep -x WaccomDrive >/dev/null; then
+    echo 'Quit WaccomDrive from its status-bar menu before installing or upgrading.' >&2
+    exit 1
+fi
