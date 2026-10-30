@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 MODE="${1:-run}"
-VERSION="${WACCOM_VERSION:-0.1.0}"
+VERSION="${WACCOM_VERSION:-0.1.1}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "WACCOM_VERSION must be X.Y.Z." >&2; exit 2; }
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -38,6 +38,8 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+mkdir -p "$APP_BUNDLE/Contents/Resources/assets"
+cp -R "$ROOT_DIR/assets/tablet" "$ROOT_DIR/assets/connection" "$APP_BUNDLE/Contents/Resources/assets/"
 cp "$ROOT_DIR/packaging/Uninstall WaccomDrive.command" "$APP_BUNDLE/Contents/Resources/Uninstall WaccomDrive.command"
 "$ROOT_DIR/script/sign.sh" "$APP_BUNDLE"
 case "$MODE" in

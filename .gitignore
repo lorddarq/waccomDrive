@@ -22,3 +22,7 @@ build/
 .env
 .env.*
 !.env.example
+
+# Python diagnostic tooling.
+__pycache__/
+*.pyc

@@ -29,9 +29,15 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 175, ideal: 195)
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 7) {
-                    Label(model.usbInterfaces > 0 ? "USB connected" : "USB disconnected", systemImage: "cable.connector")
+                    Text("Connection").foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        if model.usbInterfaces > 0, let image = TabletArtwork.connectionImage("usb") {
+                            Image(nsImage: image).resizable().scaledToFit()
+                                .frame(width: 16, height: 16).accessibilityHidden(true)
+                        }
+                        Text(model.usbInterfaces > 0 ? "USB Cable" : "Disconnected")
+                    }
                     if model.usbIssue != nil { Text("USB access unavailable").foregroundStyle(.orange) }
-                    Text(model.running ? "Driver active" : "Driver paused").foregroundStyle(model.running ? .green : .secondary)
                 }
                 .font(.caption).frame(maxWidth: .infinity, alignment: .leading).padding()
             }
@@ -40,12 +46,9 @@ struct ContentView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(pane?.rawValue ?? "Overview").font(.title2.bold())
-                        Text("Wacom Intuos Pro Large · PTH-851/K").font(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Button(model.running ? "Pause driver" : "Start driver", systemImage: model.running ? "pause.fill" : "play.fill") { model.toggleDriver() }
-                        .buttonStyle(.borderedProminent)
-                }.padding(24)
+                }.padding(.horizontal, 24).padding(.vertical, 16)
                 Divider()
                 Group {
                     switch pane ?? .overview {
@@ -63,7 +66,6 @@ struct ContentView: View {
                     Text(model.dirty ? "Unsaved changes" : model.message)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     Spacer()
-                    Button("Permission Help") { pane = .help }
                     if model.dirty { Button("Discard changes") { model.draft = model.saved } }
                     Button("Save & Apply") { model.save() }
                 }.padding(16)
@@ -78,54 +80,56 @@ struct ContentView: View {
     private var overview: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
-                TabletPreview(settings: model.saved, pen: model.pen, buttons: model.pad.buttons)
-                    .frame(height: 230)
-                GroupBox("Connection") {
-                    VStack(spacing: 12) {
-                        statusRow("Tablet", model.usbInterfaces > 0 ? "Connected over USB" : "Not connected")
-                        if let issue = model.usbIssue {
-                            Label(issue, systemImage: "hand.raised").font(.callout).foregroundStyle(.orange)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        statusRow("Surface touch", model.touchStatus)
-                        statusRow("Wireless receiver", model.receiverPresent ? "Receiver detected · wireless input not enabled" : "Not detected")
-                        statusRow("Tablet wireless module", model.power.map { $0.wirelessModuleInstalled ? "Installed" : "Not installed" } ?? "Waiting for tablet status")
-                        HStack {
-                            Text("Mac Bluetooth"); Spacer(); Text(model.bluetooth).foregroundStyle(.secondary)
-                            Button("Check") { model.checkBluetooth() }.controlSize(.small)
-                        }
-                        Divider()
-                        Text("The PTH-851 uses a Wacom wireless module and USB receiver. Module presence and Mac Bluetooth power do not confirm a wireless tablet connection.")
-                            .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                        HStack {
-                            Button("Retry USB") { model.retryUSB() }
-                            Button("Permission Help") { pane = .help }
-                            Spacer()
-                        }
-                    }.padding(10)
+                HStack(alignment: .top, spacing: 28) {
+                    TabletAsset(name: "base").frame(width: 238, height: 254)
+                    GroupBox {
+                        VStack(spacing: 12) {
+                            statusRow("Model", "PTH-851/K")
+                            statusRow("Tablet", model.usbInterfaces > 0 ? "Connected over USB" : "Not connected")
+                            if let issue = model.usbIssue {
+                                Label(issue, systemImage: "hand.raised").font(.callout).foregroundStyle(.orange)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            statusRow("Wireless receiver", model.receiverPresent ? "Receiver detected · wireless input not enabled" : "Not detected")
+                            statusRow("Tablet wireless module", model.power.map { $0.wirelessModuleInstalled ? "Installed" : "Not installed" } ?? "Waiting for tablet status")
+                            HStack {
+                                Text("Mac Bluetooth"); Spacer(); Text(model.bluetooth).foregroundStyle(.secondary)
+                                Button("Check") { model.checkBluetooth() }.controlSize(.small)
+                            }
+                            Divider()
+                            Text("The PTH-851 uses a Wacom wireless module and USB receiver. Module presence and Mac Bluetooth power do not confirm a wireless tablet connection.")
+                                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                            HStack {
+                                Button("Retry USB") { model.retryUSB() }
+                                Spacer()
+                                Button(model.running ? "Pause driver" : "Start driver") { model.toggleDriver() }
+                                    .buttonStyle(.borderedProminent)
+                            }
+                        }.padding(10)
+                    }
                 }
-                GroupBox("Battery and charging") {
-                    VStack(spacing: 12) {
-                        statusRow("Battery charge", model.power?.batteryDescription ?? "Not reported")
-                        statusRow("Charging status", model.power?.chargingDescription ?? "Not reported")
-                        Text("Read directly from the tablet's USB status reports. If the reading is unavailable or stale, no charge level is assumed.")
-                            .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                    }.padding(10)
-                }
-                GroupBox("Live pen input") {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Text(model.pen.inProximity ? (model.pen.toolID & 0xFFF == 0x80A ? "Eraser in range" : "Pen in range") : "Pen out of range")
-                            Spacer()
-                            Text("Pressure \(Int(Double(model.pen.pressure) / 2047 * 100))%").monospacedDigit()
-                        }
-                        ProgressView(value: Double(model.pen.pressure), total: 2047)
-                        Text("Tilt X \(model.pen.tiltX) · Tilt Y \(model.pen.tiltY)").font(.caption).foregroundStyle(.secondary)
-                    }.padding(10)
+                HStack(alignment: .top, spacing: 16) {
+                    GroupBox("Battery and charging") {
+                        VStack(spacing: 12) {
+                            statusRow("Battery charge", model.power?.batteryDescription ?? "Not reported")
+                            statusRow("Charging status", model.power?.chargingDescription ?? "Not reported")
+                        }.padding(10)
+                    }
+                    GroupBox("Live pen input") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text(model.pen.inProximity ? (model.pen.toolID & 0xFFF == 0x80A ? "Eraser in range" : "Pen in range") : "Pen out of range")
+                                Spacer()
+                                Text("Pressure \(Int(livePressure * 100))%").monospacedDigit()
+                            }
+                            ProgressView(value: livePressure)
+                        }.padding(10)
+                    }
                 }
             }.padding(24)
         }
     }
+    private var livePressure: Double { model.pen.inProximity ? Double(model.pen.pressure) / 2047 : 0 }
     private func statusRow(_ name: String, _ value: String) -> some View {
         HStack { Text(name); Spacer(); Text(value).foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
     }
@@ -146,7 +150,6 @@ struct ContentView: View {
                 LabeledContent("Storage", value: "On this Mac")
                 Text("Save & Apply stores your mapping, button assignments, and pressure response. The driver uses the last saved settings.")
                     .foregroundStyle(.secondary)
-                Button("Save & Apply") { model.save() }
                 Button("Show settings in Finder") {
                     NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: model.settingsPath)])
                 }
@@ -168,42 +171,34 @@ struct ContentView: View {
 struct TabletPreview: View {
     let settings: DriverSettings
     let pen: PenSample
-    let buttons: Int
     var body: some View {
         GeometryReader { geo in
-            let width = max(1, min(geo.size.width - 40, geo.size.height / 0.57, 440.0))
-            let height = width * 0.57
+            let width = max(1, min(geo.size.width, geo.size.height * 321.327 / 209.983))
+            let height = width * 209.983 / 321.327
+            // Bounds of the SVG surface layer, including the faces layer’s 0.347-point inset.
+            let surface = CGRect(x: width * 44.458 / 321.327, y: height * 20.6693 / 209.983,
+                                 width: width * 254.466 / 321.327, height: height * 168.6447 / 209.983)
             let active = settings.activeArea(in: settings.displayBounds)
-            ZStack {
-                RoundedRectangle(cornerRadius: 18).fill(.quaternary)
-                HStack(spacing: 18) {
-                    VStack(spacing: 7) {
-                        ForEach(1...4, id: \.self) { key in keyShape(key) }
-                        Circle().strokeBorder(buttons & 1 != 0 ? Color.accentColor : Color.secondary.opacity(0.5), lineWidth: 3)
-                            .frame(width: 31, height: 31).accessibilityLabel("Ring center")
-                        ForEach(5...8, id: \.self) { key in keyShape(key) }
-                    }.frame(width: 30)
-                    GeometryReader { area in
-                        ZStack(alignment: .topLeading) {
-                            RoundedRectangle(cornerRadius: 4).strokeBorder(.secondary.opacity(0.4))
-                            Rectangle().fill(Color.accentColor.opacity(0.12))
-                                .frame(width: area.size.width * active.width, height: area.size.height * active.height)
-                                .offset(x: area.size.width * active.minX, y: area.size.height * active.minY)
-                            if pen.inProximity {
-                                Circle().fill(Color.accentColor).frame(width: 8, height: 8)
-                                    .offset(x: area.size.width * Double(pen.x) / 65024 - 4, y: area.size.height * Double(pen.y) / 40640 - 4)
-                            }
-                        }
-                    }
-                }.padding(22)
-            }.frame(width: width, height: height)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }.accessibilityElement(children: .ignore)
-            .accessibilityLabel("Tablet preview. Active area highlighted. \(pen.inProximity ? "Pen in range" : "Pen out of range").")
-    }
-    private func keyShape(_ key: Int) -> some View {
-        RoundedRectangle(cornerRadius: 3).fill(buttons & (1 << key) != 0 ? Color.accentColor : Color.secondary.opacity(0.3))
-            .frame(width: 23, height: 8)
+            ZStack(alignment: .topLeading) {
+                TabletAsset(name: "mapping_faces").padding(width * 0.00108)
+                TabletAsset(name: "mapping_strokes")
+                Rectangle().fill(Color.accentColor.opacity(0.22))
+                    .overlay(Rectangle().strokeBorder(Color.accentColor, lineWidth: 1.5))
+                    .frame(width: surface.width * active.width, height: surface.height * active.height)
+                    .offset(x: surface.minX + surface.width * active.minX,
+                            y: surface.minY + surface.height * active.minY)
+                if pen.inProximity {
+                    Circle().fill(Color.accentColor).frame(width: 8, height: 8)
+                        .offset(x: surface.minX + surface.width * Double(pen.x) / 65024 - 4,
+                                y: surface.minY + surface.height * Double(pen.y) / 40640 - 4)
+                }
+            }
+            .frame(width: width, height: height)
+            .rotationEffect(.degrees(settings.rotate180 ? 180 : 0))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Tablet active area. \(pen.inProximity ? "Pen in range" : "Pen out of range").")
     }
 }
 #endif

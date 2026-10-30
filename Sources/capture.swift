@@ -7,6 +7,11 @@ import CoreGraphics
 struct Capture {
     static func main() {
         let args = CommandLine.arguments.dropFirst()
+        if ["--hid-inventory", "--hid-record"].contains(args.first ?? "") {
+            do { try HIDCapture.run(Array(args)) }
+            catch { fputs("Capture failed: \(error.localizedDescription)\n", stderr); exit(1) }
+            return
+        }
         if args.contains("--self-check") { selfCheck(); return }
         if args.count == 1, let arg = args.first, arg.hasPrefix("--replay=") {
             do {

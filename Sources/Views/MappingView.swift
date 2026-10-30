@@ -5,6 +5,17 @@ struct MappingView: View {
     @ObservedObject var model: AppModel
     var body: some View {
         Form {
+            Section("Tablet active area") {
+                TabletPreview(settings: model.draft, pen: model.pen).frame(height: 210)
+                areaSlider("Left", key: \.areaX)
+                areaSlider("Top", key: \.areaY)
+                areaSlider("Width", key: \.areaWidth)
+                areaSlider("Height", key: \.areaHeight)
+                Button("Use full tablet area") {
+                    model.draft.areaX = 0; model.draft.areaY = 0
+                    model.draft.areaWidth = 1; model.draft.areaHeight = 1
+                }
+            }
             Section("Display") {
                 Picker("Map tablet to", selection: $model.draft.displayUUID) {
                     Text("Main display (follow macOS)").tag("")
@@ -17,17 +28,6 @@ struct MappingView: View {
                 Text("Uses a centered portion of the active area to avoid stretching. A disconnected display falls back to the main display.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("Rotate tablet 180°", isOn: $model.draft.rotate180)
-            }
-            Section("Tablet active area") {
-                TabletPreview(settings: model.draft, pen: model.pen, buttons: model.pad.buttons).frame(height: 210)
-                areaSlider("Left", key: \.areaX)
-                areaSlider("Top", key: \.areaY)
-                areaSlider("Width", key: \.areaWidth)
-                areaSlider("Height", key: \.areaHeight)
-                Button("Use full tablet area") {
-                    model.draft.areaX = 0; model.draft.areaY = 0
-                    model.draft.areaWidth = 1; model.draft.areaHeight = 1
-                }
             }
         }.formStyle(.grouped)
     }

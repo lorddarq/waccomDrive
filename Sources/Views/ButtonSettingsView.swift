@@ -7,7 +7,7 @@ struct ActionPicker: View {
     @Binding var action: ButtonAction
     var body: some View {
         HStack {
-            Circle().fill(pressed ? Color.green : Color.secondary.opacity(0.25)).frame(width: 8, height: 8)
+            Circle().fill(pressed ? Color.green : (action == .none ? Color.secondary.opacity(0.25) : Color.accentColor)).frame(width: 8, height: 8)
                 .accessibilityLabel(pressed ? "Pressed" : "Released")
             Picker(title, selection: $action) {
                 ForEach(ButtonAction.allCases) { action in Text(action.title).tag(action) }
@@ -44,9 +44,10 @@ struct PenSettingsView: View {
                     ProgressView(value: model.draft.pressure(model.pen.pressure))
                     Text(model.draft.pressure(model.pen.pressure), format: .percent.precision(.fractionLength(0))).monospacedDigit().frame(width: 45)
                 }
+                LabeledContent("Live tilt", value: "X \(model.pen.tiltX) · Y \(model.pen.tiltY)")
                 HStack {
                     Text("Tip activation")
-                    Slider(value: Binding(get: { Double(model.draft.contactThreshold) }, set: { model.draft.contactThreshold = Int($0) }), in: 0...2046, step: 1)
+                    Slider(value: Binding(get: { Double(model.draft.contactThreshold) }, set: { model.draft.contactThreshold = Int($0.rounded()) }), in: 0...2046)
                         .accessibilityLabel("Tip activation threshold")
                     Text("\(model.draft.contactThreshold)").monospacedDigit().frame(width: 45)
                 }
@@ -70,17 +71,23 @@ struct TabletButtonsView: View {
     @State private var hoveredKey: Int?
     var body: some View {
         VStack(spacing: 0) {
-            ExpressKeyDiagram(selected: hoveredKey ?? selectedKey, pressed: model.pad.buttons, ring: model.pad.ring) { selectedKey = $0; hoveredKey = nil }
-                .frame(height: 235).padding(.horizontal, 24).padding(.top, 12)
-            Text((hoveredKey ?? selectedKey) == 0 ? "Target: touch-ring center button" : "Target: ExpressKey \(hoveredKey ?? selectedKey)")
-                .font(.caption.weight(.medium)).padding(.bottom, 12)
+            HStack(alignment: .bottom, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Selected").foregroundStyle(.secondary)
+                    Text((hoveredKey ?? selectedKey) == 0 ? "Ring center" : "ExpressKey \(hoveredKey ?? selectedKey)")
+                        .fontWeight(.semibold)
+                }.frame(width: 195, alignment: .leading).padding(.bottom, 16)
+                ExpressKeyDiagram(selected: hoveredKey ?? selectedKey, hovered: hoveredKey, pressed: model.pad.buttons, ring: model.pad.ring, actions: model.draft.tabletButtons, ringCustomized: model.draft.ringSettings != RingSettings()) {
+                    selectedKey = $0; hoveredKey = nil
+                }
+            }.frame(height: 264).padding(.horizontal, 24).padding(.bottom, 4)
             Divider()
             Form {
-                Section("ExpressKeys") {
+                Section("ExpressKey Customization") {
                     ForEach(1...8, id: \.self) { index in
                         mappingRow(index: index, title: "ExpressKey \(index)")
                     }
-                    Text("Select a number on the diagram or hover a mapping row to locate its key. Green indicates a physical press. Shown with buttons on the left; press each key to verify numbering.")
+                    Text("Blue marks customized or hovered controls; black is the default. Click a key or hover its row to locate it. Green indicates a physical press.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Touch ring") {
@@ -103,62 +110,71 @@ struct TabletButtonsView: View {
                 }
             }.formStyle(.grouped)
         }
+        .onChange(of: model.pad.buttons) { previous, current in
+            let newlyPressed = current & ~previous
+            if let index = (0...8).first(where: { newlyPressed & (1 << $0) != 0 }) {
+                selectedKey = index; hoveredKey = nil
+            }
+        }
     }
     private func mappingRow(index: Int, title: String) -> some View {
-        HStack {
-            Button { selectedKey = index; hoveredKey = nil } label: {
-                Text(index == 0 ? "C" : String(index)).font(.caption.monospacedDigit().bold())
-                    .frame(width: 24, height: 24)
-                    .background((hoveredKey ?? selectedKey) == index ? Color.accentColor.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
-            }
-            .buttonStyle(.plain).accessibilityLabel("Locate \(title) on tablet")
-            ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, action: $model.draft.tabletButtons[index])
-                .onChange(of: model.draft.tabletButtons[index]) { _, _ in selectedKey = index }
-        }.onHover { inside in hoveredKey = inside ? index : nil }
+        ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, action: $model.draft.tabletButtons[index])
+            .onChange(of: model.draft.tabletButtons[index]) { _, _ in selectedKey = index }
+            .contentShape(Rectangle())
+            .onHover { inside in hoveredKey = inside ? index : nil }
     }
 }
 
 private struct ExpressKeyDiagram: View {
     let selected: Int
+    let hovered: Int?
     let pressed: Int
     let ring: Int?
+    let actions: [ButtonAction]
+    let ringCustomized: Bool
     let select: (Int) -> Void
-    var body: some View {
-        HStack(spacing: 14) {
-            VStack(spacing: 3) {
-                ForEach(1...4, id: \.self) { index in key(index) }
-                key(0).padding(.vertical, 4)
-                ForEach(5...8, id: \.self) { index in key(index) }
-            }.frame(width: 42)
-            ZStack {
-                RoundedRectangle(cornerRadius: 5).strokeBorder(.secondary.opacity(0.35))
-                Text("Intuos Pro Large").font(.caption).foregroundStyle(.secondary)
-            }.padding(.vertical, 5)
-        }
-        .padding(18)
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 18))
-        .frame(maxWidth: 460).padding(.vertical, 4)
-        .frame(maxWidth: .infinity)
+
+    // Hit regions in the shared 479 × 264 viewBox of the two supplied close-ups.
+    private func region(_ index: Int) -> CGRect {
+        if index == 0 { return CGRect(x: 32, y: 118, width: 29, height: 29) }
+        let tops: [Double] = [15.7, 34.9, 54, 73.2, 177.1, 196.3, 215.4, 234.6]
+        return CGRect(x: 35, y: tops[index - 1], width: 23, height: 15)
     }
-    private func key(_ index: Int) -> some View {
-        let down = pressed & (1 << index) != 0
-        return Button { select(index) } label: {
-            Text(index == 0 ? "C" : String(index))
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(down || selected == index ? Color.white : Color.primary)
-                .frame(width: index == 0 ? 32 : 36, height: index == 0 ? 32 : 16)
-                .background(down ? Color.green : (selected == index ? Color.accentColor : Color.secondary.opacity(0.2)),
-                            in: RoundedRectangle(cornerRadius: index == 0 ? 16 : 4))
-        }
-        .buttonStyle(.plain)
-        .overlay {
-            if index == 0 {
-                Circle().strokeBorder(ring == nil ? Color.secondary.opacity(0.3) : Color.green, lineWidth: 2).padding(-4)
-                    .allowsHitTesting(false)
+    var body: some View {
+        GeometryReader { geo in
+            let scale = min(geo.size.width / 479, geo.size.height / 264)
+            ZStack(alignment: .topLeading) {
+                TabletAsset(name: "express_keys")
+                ForEach(0...8, id: \.self) { index in
+                    let rect = region(index)
+                    let down = pressed & (1 << index) != 0
+                    if (actions[index] != .none || hovered == index || down), let image = TabletArtwork.keyOverlay(index) {
+                        Image(nsImage: image).resizable().scaledToFit()
+                            .hueRotation(.degrees(down ? -85 : 0)).allowsHitTesting(false)
+                    }
+                    if selected == index {
+                        RoundedRectangle(cornerRadius: index == 0 ? 18 : 4)
+                            .strokeBorder(Color.primary.opacity(0.55), lineWidth: 1.5)
+                            .frame(width: (rect.width + 6) * scale, height: (rect.height + 6) * scale)
+                            .offset(x: (rect.minX - 3) * scale, y: (rect.minY - 3) * scale)
+                            .allowsHitTesting(false)
+                    }
+                    Button { select(index) } label: { Color.clear.contentShape(Rectangle()) }
+                        .buttonStyle(.plain)
+                        .frame(width: (rect.width + 8) * scale, height: (rect.height + 4) * scale)
+                        .offset(x: (rect.minX - 4) * scale, y: (rect.minY - 2) * scale)
+                        .accessibilityLabel(index == 0 ? "Ring center" : "ExpressKey \(index)")
+                        .accessibilityValue(down ? "Pressed" : (selected == index ? "Selected" : "Released"))
+                }
+                if (ringCustomized || ring != nil), let image = TabletArtwork.ringOverlay {
+                    Image(nsImage: image).resizable().scaledToFit()
+                        .hueRotation(.degrees(ring != nil ? -85 : 0)).allowsHitTesting(false)
+                }
             }
+            .frame(width: 479 * scale, height: 264 * scale)
+            .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: 12, topTrailingRadius: 12))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .accessibilityLabel(index == 0 ? "Locate center button" : "Locate ExpressKey \(index)")
-        .accessibilityValue(down ? "Pressed" : (selected == index ? "Targeted" : "Released"))
     }
 }
 #endif

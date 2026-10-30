@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "sources": {
+    "2013": "https://estore.wacom.com/media/sebwite/productdownloads/i/n/intuos5_factsheet_en-weg_1.pdf",
+    "2017-family": "https://estore.wacom.com/media/sebwite/productdownloads/i/n/intuos_pro_factsheet_en_weg_39.pdf",
+    "2025": "https://cdn-media.wacom.com/-/media/files/downloads/product-support/ipis/pen-tablets/wacom-intuos-pro-2025/ipi_en.pdf?rev=d5328e7eb97e4cd891be74a4486fd8d3"
+  },
+  "models": [
+    {
+      "id": "pth-451",
+      "model": "PTH-451",
+      "name": "Wacom Intuos Pro Small",
+      "generation": "2013",
+      "size": "small",
+      "edition": "standard",
+      "aliases": [
+        "PTH451",
+        "PTH-451/K"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2013"
+    },
+    {
+      "id": "pth-651",
+      "model": "PTH-651",
+      "name": "Wacom Intuos Pro Medium",
+      "generation": "2013",
+      "size": "medium",
+      "edition": "standard",
+      "aliases": [
+        "PTH651",
+        "PTH-651/K"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2013"
+    },
+    {
+      "id": "pth-651-special",
+      "model": "PTH-651/S",
+      "name": "Wacom Intuos Pro Medium Special Edition",
+      "generation": "2013",
+      "size": "medium",
+      "edition": "special",
+      "aliases": [
+        "PTH651S"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2013"
+    },
+    {
+      "id": "pth-851",
+      "model": "PTH-851",
+      "name": "Wacom Intuos Pro Large",
+      "generation": "2013",
+      "size": "large",
+      "edition": "standard",
+      "aliases": [
+        "PTH851",
+        "PTH-851/K"
+      ],
+      "images": {
+        "base": "tablet.svg",
+        "overlay": "tablet-overlays.svg",
+        "express_keys": "tablet-overlays-express.svg",
+        "mapping_faces": "mapping-faces.svg",
+        "mapping_strokes": "mapping-strokes.svg"
+      },
+      "source": "2013"
+    },
+    {
+      "id": "pth-460",
+      "model": "PTH-460",
+      "name": "Wacom Intuos Pro Small",
+      "generation": "2017-family",
+      "size": "small",
+      "edition": "standard",
+      "aliases": [
+        "PTH460"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2017-family"
+    },
+    {
+      "id": "pth-660",
+      "model": "PTH-660",
+      "name": "Wacom Intuos Pro Medium",
+      "generation": "2017-family",
+      "size": "medium",
+      "edition": "standard",
+      "aliases": [
+        "PTH660"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2017-family"
+    },
+    {
+      "id": "pth-860",
+      "model": "PTH-860",
+      "name": "Wacom Intuos Pro Large",
+      "generation": "2017-family",
+      "size": "large",
+      "edition": "standard",
+      "aliases": [
+        "PTH860"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2017-family"
+    },
+    {
+      "id": "pth-660-paper",
+      "model": "PTH-660P",
+      "name": "Wacom Intuos Pro Paper Edition Medium",
+      "generation": "2017-family",
+      "size": "medium",
+      "edition": "paper",
+      "aliases": [
+        "PTH660P"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2017-family"
+    },
+    {
+      "id": "pth-860-paper",
+      "model": "PTH-860P",
+      "name": "Wacom Intuos Pro Paper Edition Large",
+      "generation": "2017-family",
+      "size": "large",
+      "edition": "paper",
+      "aliases": [
+        "PTH860P"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2017-family"
+    },
+    {
+      "id": "ptk-470",
+      "model": "PTK470",
+      "name": "Wacom Intuos Pro Small",
+      "generation": "2025",
+      "size": "small",
+      "edition": "standard",
+      "aliases": [
+        "PTK-470"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2025"
+    },
+    {
+      "id": "ptk-670",
+      "model": "PTK670",
+      "name": "Wacom Intuos Pro Medium",
+      "generation": "2025",
+      "size": "medium",
+      "edition": "standard",
+      "aliases": [
+        "PTK-670"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2025"
+    },
+    {
+      "id": "ptk-870",
+      "model": "PTK870",
+      "name": "Wacom Intuos Pro Large",
+      "generation": "2025",
+      "size": "large",
+      "edition": "standard",
+      "aliases": [
+        "PTK-870"
+      ],
+      "images": {
+        "base": null,
+        "overlay": null,
+        "express_keys": null
+      },
+      "source": "2025"
+    }
+  ]
+}

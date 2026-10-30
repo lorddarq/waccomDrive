@@ -70,6 +70,19 @@ WACCOM_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./script/bui
 - Decoder and settings checks: `build/waccom-capture --self-check`.
 - Capture replay: `build/waccom-capture --replay=captures/first-session-excerpt.txt`.
 
+## Guided captures for other tablets
+
+- Run `./script/capture_tablet.command` to build and start the capture guide.
+- Each step requires explicit confirmation; repeats, skips, unavailable features, and partial sessions are preserved.
+- Saves raw reports, device identity/descriptors, capability evidence, and notes under `captures/`. This does not add driver support automatically.
+- See [capture instructions and limitations](docs/guided-capture.md).
+
+## Tablet artwork
+
+- [Model index](assets/tablet/models.json): Intuos Pro models and three SVG slots per model—base, overlay, and ExpressKeys.
+- Existing artwork is assigned to PTH-851; unassigned models use `null` image locations.
+- See [catalog format and image roles](assets/tablet/README.md).
+
 ## Distribution
 
 You may freely use and build on top of the available source code, as long as you credit back in the license.
