@@ -41,7 +41,7 @@ while True: time.sleep(.01)
     # An empty completion answer must not confirm. Repeat retains both attempts.
     output = root / 'repeat'
     sys.argv = ['capture_tablet.py', '--recorder', str(recorder), '--output', str(output)]
-    answers(['1', 'TEST MODEL', '0', '0', '0', 'u', '', '', '', 'r', 'redo', '', '', 'y', 'done', 'q'])
+    answers(['1', 'TEST MODEL', '0', '0', '0', 'a', '', '', '', 'r', 'redo', '', '', 'y', 'done', 'q'])
     assert wizard.main() == 0
     session = json.loads((output / 'session.json').read_text())
     step = session['steps'][0]
@@ -50,6 +50,7 @@ while True: time.sleep(.01)
     assert all(a['statistics']['reports'] == 3 and a['statistics']['ended'] for a in step['attempts'])
     assert (output / step['attempts'][0]['file']).exists()
     device = json.loads((output / 'device.json').read_text())
+    assert device['user_reported']['wireless'] == 'a'
     assert device['advertised_capabilities']['pressure']['state'] == 'advertised'
     assert device['advertised_capabilities']['battery']['state'] == 'unknown'
     # Every remaining step needs its own explicit decision, even with no controls configured.

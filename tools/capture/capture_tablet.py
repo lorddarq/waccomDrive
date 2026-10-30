@@ -63,15 +63,18 @@ def select_products(devices):
         names = ', '.join(sorted({str(d.get('product') or 'Unnamed Wacom device') for d in entries}))
         transports = ', '.join(sorted({str(d.get('transport') or 'Unknown transport') for d in entries}))
         print(f'  {index}. {names} — 056A:{pid:04X} — {transports} — {len(entries)} interfaces')
+    print('Enter the list number shown before the device name, not its name or USB ID.')
+    print('For one device, type 1. For multiple devices, type their list numbers separated by commas (for example, 1,2).')
+    print('If your tablet connects through the listed wireless receiver, select that receiver too.')
     while True:
-        answer = input('Select tablet/receiver numbers (comma-separated; include its receiver if connected): ').strip()
+        answer = input(f'Device list number(s) (1–{len(ids)}; e.g. 1; use commas for multiple): ').strip()
         try:
             selected = {int(value.strip()) for value in answer.split(',')}
             if selected and all(1 <= item <= len(ids) for item in selected):
                 return [ids[item - 1] for item in sorted(selected)]
         except ValueError:
             pass
-        print('Choose the displayed numbers explicitly.')
+        print(f'Enter a list number from 1 to {len(ids)}; separate multiple selections with commas.')
 
 
 def advertised(devices):
@@ -97,11 +100,11 @@ def steps(keys, dials, pen_buttons):
     def add(identifier, category, title, actions):
         plan.append({'id': identifier, 'category': category, 'title': title, 'actions': actions})
     def baseline(category):
-        add(category + '-baseline', category, 'Quiet baseline', 'Keep all fingers, palms, and the pen away. Do not press keys or move a dial. Record a short quiet interval.')
+        add(category + '-baseline', category, 'Idle recording — leave the tablet untouched', 'After starting recording, leave the tablet alone for about 5 seconds, then press Enter to stop. Keep fingers and palms off the surface and the pen well away from the tablet. Do not press buttons or move rings, strips, dials, or wheels. This records what the tablet sends when nobody is using it.')
     baseline('touch')
     for identifier, title, actions in [
-        ('switch', 'Physical touch switch', 'If fitted, turn touch off, then on. Pause in each state. Finish with touch enabled.'),
-        ('one-finger', 'One-finger surface movement', 'Touch and lift one finger repeatedly, then move it slowly around the entire active surface and each edge.'),
+        ('switch', 'Physical touch switch (if available without driver software)', 'Test only a physical switch that controls touch without driver software. If touch is controlled only through driver settings, or there is no physical switch, choose a (not available) and note this. Otherwise, move the switch to off, pause, then on, and pause again. Finish in the on position. If you do not know whether it works without a driver, record both positions and say so in the notes; do not assume touch was disabled or enabled.'),
+        ('one-finger', 'One-finger surface movement', 'On the main touch surface only, excluding touch rings and strips, touch and lift one finger repeatedly, then slide it slowly across the entire surface and along each edge. Rings and strips have separate tests later.'),
         ('two-fingers', 'Two-finger scrolling', 'Place two fingers down, move vertically and horizontally, then lift both. Repeat in both directions.'),
         ('pinch', 'Pinch gesture', 'Place two fingers down; pinch together and spread apart slowly, then quickly. Lift both fingers between repeats.'),
         ('rotation', 'Rotation gesture', 'Rotate two fingers clockwise and counterclockwise. Lift both fingers between repeats.'),
@@ -109,18 +112,18 @@ def steps(keys, dials, pen_buttons):
         ('palm', 'Palm without pen', 'Rest your palm on the surface, move it, and lift it. Repeat with a hand edge and with fingers touching at the same time.'),
         ('palm-and-pen', 'Palm and pen together', 'Keep your palm resting on the surface. Bring the pen into hover, draw, lift the tip, and move the pen completely away. Lift the palm. Repeat with fingers resting on the surface.'),
     ]:
-        add('touch-' + identifier, 'touch', title, actions)
+        add('touch-' + identifier, 'touch', title, 'Finger and palm tests use only the main touch surface, excluding touch rings and strips.\n' + actions)
     baseline('keys')
     for i in range(1, keys + 1):
         add(f'key-{i:02}', 'keys', f'ExpressKey {i}', f'Identify physical key {i} in your chosen order. Touch lightly without pressing, press/release three times, then hold and release. Do not press other keys. Describe its physical position in the notes.')
     baseline('dials')
     for i in range(1, dials + 1):
         for suffix, title, actions in [
-            ('rotation', 'Movement', 'Turn clockwise and counterclockwise slowly, then quickly. Complete full revolutions where possible. For a strip/slider, travel end to end in both directions.'),
-            ('contact', 'Contact and lift', 'Touch without moving, move a short distance, then lift. Repeat at several starting positions. For a mechanical dial without touch sensing, mark this step not available.'),
+            ('rotation', 'Movement', 'For a touch ring, slide your fingertip around its surface clockwise and counterclockwise; the ring itself does not turn. For a touch strip, slide your fingertip end to end in both directions. For a mechanical dial/wheel, physically turn it in both directions. Test slowly, then quickly, completing full revolutions where possible.'),
+            ('contact', 'Contact and lift', 'For a touch-sensitive ring/strip/dial/wheel, rest your fingertip on its sensing surface without moving, slide a short distance, then lift. Repeat at several starting positions. For a mechanical dial/wheel without touch sensing, mark this step not available.'),
             ('buttons', 'Center press and modes', 'Press/release the center or push action, hold and release, then cycle each available mode. Move the dial in each mode. If there is no push/mode control, mark this step not available.'),
         ]:
-            add(f'dial-{i:02}-{suffix}', 'dials', f'Dial/ring/strip {i}: {title}', actions)
+            add(f'dial-{i:02}-{suffix}', 'dials', f'Ring/strip/dial/wheel {i}: {title}', actions)
     baseline('pen')
     for identifier, title, actions in [
         ('proximity', 'Pen proximity', 'From well outside range, approach in hover without touching, pause, then withdraw completely. Repeat several times.'),
@@ -254,7 +257,7 @@ def run_step(step, recorder, output, session):
             attempt['ended_at'] = now()
             attempt['status'] = 'awaiting_confirmation' if valid else 'failed'
             save_session(output, session)
-        print(f"Reports recorded: {attempt.get('statistics', {}).get('reports', 0)}. This does not determine capability support.")
+        print(f"Recording stopped. Reports recorded: {attempt.get('statistics', {}).get('reports', 0)}. This does not determine capability support.")
         answer = choice('Did you complete ALL listed actions? y confirm | r repeat | a not available | s skip | d rescan devices and repeat | q finish session: ', ['y', 'r', 'a', 's', 'd', 'q'])
         if answer == 'y' and not valid:
             print('A failed recording cannot be confirmed. Repeat, rescan, skip, or mark not available.')
@@ -263,7 +266,7 @@ def run_step(step, recorder, output, session):
             continue
         attempt['confirmation'] = answer
         attempt['confirmed_at'] = now()
-        attempt['notes'] = input('Observations / physical position / number of fingers tested (optional): ').strip()
+        attempt['notes'] = input('Optional notes for the recording just stopped (e.g. button location or finger count, if relevant). No recording is running; press Enter to leave blank: ').strip()
         attempt['status'] = {'y': 'user_confirmed', 'r': 'repeat_requested', 'a': 'user_reported_absent', 's': 'skipped', 'd': 'repeat_requested', 'q': 'unverified'}[answer]
         save_session(output, session)
         if answer == 'q':
@@ -300,10 +303,10 @@ def main():
     print('All interfaces/devices with the selected product IDs are recorded, including reconnects on any transport.')
     print('If multiple identical tablets are attached, disconnect the extras to isolate one.')
     model_label = input('Model printed on the tablet label (optional): ').strip()
-    counts = {'keys': number('Number of ExpressKeys to test (0–32): ', 32),
-              'dials': number('Number of rings/dials/strips to test (0–8): ', 8),
-              'pen_buttons': number('Number of pen side buttons to test (0–8): ', 8)}
-    wireless = choice('Wireless hardware: b native Bluetooth | r USB receiver | n none | u unknown: ', ['b', 'r', 'n', 'u'])
+    counts = {'keys': number('How many ExpressKeys (tablet shortcut buttons), excluding rings/strips/dials/wheels and their center/mode buttons? (0–32; 0 = none or unknown): ', 32),
+              'dials': number('How many touch rings/strips or mechanical dials/wheels? Count each once; its center/mode buttons are tested with it (e.g. one touch ring + center button = 1). (0–8; 0 = none or unknown): ', 8),
+              'pen_buttons': number('How many side buttons on the pen? Exclude the tip and eraser. (0–8; 0 = none or unknown): ', 8)}
+    wireless = choice('Which wireless connections does the tablet support (even if not connected now)? b = native Bluetooth | r = USB wireless receiver | a = both | n = neither | u = unknown: ', ['b', 'r', 'a', 'n', 'u'])
     identifier = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
     output = (args.output or Path(__file__).resolve().parent / 'captures' / ('session-' + identifier)).resolve()
     output.mkdir(parents=True, exist_ok=False)
