@@ -107,12 +107,14 @@ WACCOM_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./script/bui
 - Decoder and settings checks: `build/waccom-capture --self-check`.
 - Capture replay: `build/waccom-capture --replay=captures/first-session-excerpt.txt`.
 
-## Guided captures for other tablets
+## Support for other devices
 
-- Run `./tools/capture/capture_tablet.command` to build and start the capture guide.
-- Each step requires explicit confirmation; repeats, skips, unavailable features, and partial sessions are preserved.
-- Saves raw reports, device identity/descriptors, capability evidence, and notes under `tools/capture/captures/`. This does not add driver support automatically.
-- See [capture instructions and limitations](tools/capture/README.md).
+- Help add support for other Wacom Intuos and Intuos Pro models by submitting a guided capture. Captures provide evidence for decoding; they do not enable support automatically.
+- The [capture tool and its source](tools/capture/) are included separately from the driver: a native Swift HID recorder and a Python guide. It records device identity, capabilities, and raw input while guiding you through pen, touch, buttons, rings/dials, wireless, and battery checks. You manually confirm each step; unavailable features can be skipped.
+- Quit tablet drivers, connect your tablet, then run `./tools/capture/capture_tablet.command` from the project folder. Requires macOS, Apple's Command Line Tools with Swift 6, and Python 3. See [full capture instructions](tools/capture/README.md).
+- Compress the complete session folder from `tools/capture/captures/` as a ZIP. Name it with the exact model code printed on the **back of the tablet** and its release year, for example `PTH-851-K_2013_USB.zip`. Use the model's release year, not its purchase year; write `year-unknown` if unsure. Keep the files inside unchanged.
+- [Open an issue](https://github.com/lorddarq/waccomDrive/issues/new) titled `Device support: <model code> (<release year>)` and attach the ZIP. Include the product name/size, macOS version, Mac chip, connection type (USB, Wacom receiver, or Bluetooth), receiver model/USB ID if present, pen model if known, and any incomplete steps or unusual behavior. A photo of the back label helps; hide serial numbers and barcodes.
+- Review captures before sharing: raw data may contain identifying information. Nothing is uploaded automatically. Submit separate captures for each model and connection type when possible.
 
 ## Tablet artwork
 
