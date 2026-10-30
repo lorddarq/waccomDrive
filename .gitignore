@@ -14,6 +14,7 @@ build/
 !/captures/pen-buttons.txt
 !/captures/touch-ring.txt
 !/captures/touch-surface-retry.txt
+!/captures/wireless-receiver.txt
 
 # Signing credentials and local secrets must stay outside source control.
 *.p12

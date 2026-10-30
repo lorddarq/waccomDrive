@@ -13,6 +13,8 @@ final class TabletSession {
     var onPen: ((PenSample) -> Void)?
     var onPad: ((PadSample) -> Void)?
     var onTouch: ((Int, String) -> Void)?
+    var onCyclePressureProfile: (() -> Void)?
+    var onTouchEnabledChanged: ((Bool) -> Void)?
     var onConnection: ((Int, Bool) -> Void)?
     var onWireless: ((WirelessStatus?) -> Void)?
     private(set) var wirelessStatus: WirelessStatus?
@@ -38,6 +40,15 @@ final class TabletSession {
         buttons.posting = posting
         touch.posting = posting
         output.contactThreshold = threshold
+        buttons.onCyclePressureProfile = { [weak self] in self?.onCyclePressureProfile?() }
+        buttons.onToggleTouch = { [weak self] in
+            guard let self else { return }
+            var settings = touch.settings
+            settings.enabled.toggle()
+            touch.configure(settings)
+            publishTouch()
+            onTouchEnabledChanged?(settings.enabled)
+        }
     }
     func configure(_ settings: DriverSettings) {
         reset()
@@ -47,6 +58,11 @@ final class TabletSession {
         touch.configure(settings.touchSettings)
         touch.bounds = settings.displayBounds
         publishTouch()
+    }
+    func applyPressureProfile(_ profile: PressureProfile) {
+        // Preserve held buttons and proximity while changing only pressure response.
+        profile.apply(to: &output.settings)
+        output.contactThreshold = profile.contactThreshold
     }
     func setPosting(_ enabled: Bool) {
         reset()
@@ -234,11 +250,13 @@ final class TabletSession {
                 if status.productID != wirelessStatus?.productID { clearWireless() }
                 wirelessStatus = status
                 updateTouchOwnership()
-                if devices.isEmpty { powerStatus = status.power; lastPowerReport = lastWirelessReport; onPower?(status.power) }
                 onWireless?(status)
             }
             // Refresh battery freshness even when its value is unchanged.
-            if devices.isEmpty { lastPowerReport = lastWirelessReport }
+            if devices.isEmpty {
+                if powerStatus != status.power { powerStatus = status.power; onPower?(status.power) }
+                lastPowerReport = lastWirelessReport
+            }
             return
         }
         // Never apply this tablet's coordinate decoder to another paired model.

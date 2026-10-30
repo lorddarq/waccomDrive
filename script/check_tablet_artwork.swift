@@ -11,6 +11,9 @@ struct ArtworkCheck {
         for name in ["usb", "bluetooth-on", "bluetooth-off", "wifi-full", "wifi-half", "wifi-low", "wifi-off"] {
             precondition(TabletArtwork.connectionImage(name) != nil, "Missing connector SVG: \(name)")
         }
+        for name in ["battery-status-10", "battery-status-20", "battery-status-50", "battery-status-80", "battery-status-full", "battery-status-charging", "battery-status-10-1"] {
+            precondition(TabletArtwork.batteryImage(name) != nil, "Missing battery SVG: \(name)")
+        }
         for key in 0...8 {
             guard let image = TabletArtwork.keyOverlay(key),
                   let data = image.tiffRepresentation,

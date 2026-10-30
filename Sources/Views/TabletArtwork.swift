@@ -26,15 +26,16 @@ enum TabletArtwork {
         return result
     }()
     static func image(_ name: String) -> NSImage? { images[name] }
-    private static let connections: [String: NSImage] = {
-        let directory = folder.deletingLastPathComponent().appendingPathComponent("connection")
-        var result: [String: NSImage] = [:]
-        for name in ["usb", "bluetooth-on", "bluetooth-off", "wifi-full", "wifi-half", "wifi-low", "wifi-off"] {
-            result[name] = NSImage(contentsOf: directory.appendingPathComponent(name + ".svg"))
-        }
-        return result
-    }()
+    private static func loadIcons(_ directory: String, names: [String]) -> [String: NSImage] {
+        let directoryURL = folder.deletingLastPathComponent().appendingPathComponent(directory)
+        return Dictionary(uniqueKeysWithValues: names.compactMap { name in
+            NSImage(contentsOf: directoryURL.appendingPathComponent(name + ".svg")).map { (name, $0) }
+        })
+    }
+    private static let connections = loadIcons("connection", names: ["usb", "bluetooth-on", "bluetooth-off", "wifi-full", "wifi-half", "wifi-low", "wifi-off"])
+    private static let batteries = loadIcons("battery", names: ["battery-status-10", "battery-status-20", "battery-status-50", "battery-status-80", "battery-status-full", "battery-status-charging", "battery-status-10-1"])
     static func connectionImage(_ name: String) -> NSImage? { connections[name] }
+    static func batteryImage(_ name: String) -> NSImage? { batteries[name] }
 
 
     // Keep the source SVG intact. Isolate each overlay in a private copy,

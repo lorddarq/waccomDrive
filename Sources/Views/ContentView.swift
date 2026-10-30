@@ -124,7 +124,15 @@ struct ContentView: View {
                     if let power = model.power, power.wirelessModuleInstalled {
                         GroupBox("Battery and charging") {
                             VStack(spacing: 12) {
-                                statusRow("Battery charge", power.batteryDescription)
+                                HStack {
+                                    Text("Battery charge")
+                                    Spacer()
+                                    if let name = power.batteryIcon, let image = TabletArtwork.batteryImage(name) {
+                                        Image(nsImage: image).resizable().scaledToFit()
+                                            .frame(width: 24, height: 24).accessibilityHidden(true)
+                                    }
+                                    Text(power.batteryDescription).foregroundStyle(.secondary).monospacedDigit()
+                                }
                                 statusRow("Charging status", power.chargingDescription)
                             }.padding(10)
                         }
@@ -140,6 +148,15 @@ struct ContentView: View {
                         }.padding(10)
                     }
                 }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Unofficial Wacom driver").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                    Text("WaccomDrive is an independent project. It is not affiliated with, endorsed by, or supported by Wacom.")
+                    Text("Supported models").fontWeight(.semibold)
+                    Text("• Intuos Pro Large PTH-851/K — direct USB or Wacom USB wireless receiver (056A:0084).")
+                    Text("Provided as is, without warranty. Use at your own risk. Other models and native Bluetooth input are not supported.")
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }.padding(24)
         }
     }

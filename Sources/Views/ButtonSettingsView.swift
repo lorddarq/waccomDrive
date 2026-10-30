@@ -4,13 +4,16 @@ import SwiftUI
 struct ActionPicker: View {
     let title: String
     let pressed: Bool
+    var profilesAvailable = false
     @Binding var action: ButtonAction
     var body: some View {
         HStack {
             Circle().fill(pressed ? Color.green : (action == .none ? Color.secondary.opacity(0.25) : Color.accentColor)).frame(width: 8, height: 8)
                 .accessibilityLabel(pressed ? "Pressed" : "Released")
             Picker(title, selection: $action) {
-                ForEach(ButtonAction.allCases) { action in Text(action.title).tag(action) }
+                ForEach(ButtonAction.allCases.filter { $0 != .cyclePressureProfile || profilesAvailable || $0 == action }) { item in
+                    Text(item.title).tag(item).disabled(item == .cyclePressureProfile && !profilesAvailable)
+                }
             }
         }
     }
@@ -18,8 +21,36 @@ struct ActionPicker: View {
 
 struct PenSettingsView: View {
     @ObservedObject var model: AppModel
+    @State private var profileName = ""
     var body: some View {
         Form {
+            Section("Pressure profiles") {
+                Picker("Profile", selection: Binding(get: { model.selectedPressureProfile?.id }, set: { model.selectPressureProfile($0) })) {
+                    Text("Custom").tag(UUID?.none)
+                    ForEach(model.pressureProfiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
+                }
+                HStack {
+                    TextField("New profile name", text: $profileName)
+                    Button("Save as new") {
+                        model.savePressureProfile(name: profileName)
+                        if model.error == nil { profileName = "" }
+                    }.disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                HStack {
+                    Button("Update profile") { model.savePressureProfile(name: "", updating: true) }
+                        .disabled(model.selectedPressureProfile == nil)
+                    Button("Delete profile", role: .destructive) { model.deletePressureProfile() }
+                        .disabled(model.selectedPressureProfile == nil)
+                    Spacer()
+                    Button("Show JSON files") { model.showPressureProfiles() }.disabled(model.pressureProfiles.isEmpty)
+                }
+                if let profile = model.selectedPressureProfile,
+                   profile.sensitivity != model.draft.sensitivity || profile.contactThreshold != model.draft.contactThreshold {
+                    Text("Modified profile. Update profile to replace its saved values.").font(.caption).foregroundStyle(.secondary)
+                }
+                Text("Profiles store sensitivity and tip activation locally. Select a profile, then Save & Apply. Button cycling uses the displayed order.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Pressure sensitivity") {
                 HStack {
                     Text("Firm")
@@ -56,7 +87,7 @@ struct PenSettingsView: View {
             }
             Section("Pen buttons") {
                 ForEach(0..<2, id: \.self) { index in
-                    ActionPicker(title: "Pen button \(index + 1)", pressed: model.pen.buttons & (1 << index) != 0, action: $model.draft.penButtons[index])
+                    ActionPicker(title: "Pen button \(index + 1)", pressed: model.pen.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.penButtons[index])
                 }
                 Text("Press a side button to identify it by the live indicator. Hold actions stay down until the button is released; shortcuts run once per press.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -77,8 +108,8 @@ struct TabletButtonsView: View {
                     Text((hoveredKey ?? selectedKey) == 0 ? "Ring center" : "ExpressKey \(hoveredKey ?? selectedKey)")
                         .fontWeight(.semibold)
                 }.frame(width: 195, alignment: .leading).padding(.bottom, 16)
-                ExpressKeyDiagram(selected: hoveredKey ?? selectedKey, hovered: hoveredKey, pressed: model.pad.buttons, ring: model.pad.ring, actions: model.draft.tabletButtons, ringCustomized: model.draft.ringSettings != RingSettings()) {
-                    selectedKey = $0; hoveredKey = nil
+                ExpressKeyDiagram(selected: hoveredKey ?? selectedKey, hovered: hoveredKey, pressed: model.pad.buttons, ring: model.pad.ring, actions: model.draft.tabletButtons, ringCustomized: model.draft.ringSettings != RingSettings(), hover: updateHover) {
+                    selectedKey = $0
                 }
             }.frame(height: 264).padding(.horizontal, 24).padding(.bottom, 4)
             Divider()
@@ -113,15 +144,18 @@ struct TabletButtonsView: View {
         .onChange(of: model.pad.buttons) { previous, current in
             let newlyPressed = current & ~previous
             if let index = (0...8).first(where: { newlyPressed & (1 << $0) != 0 }) {
-                selectedKey = index; hoveredKey = nil
+                selectedKey = index
             }
         }
     }
+    private func updateHover(_ index: Int, _ inside: Bool) {
+        hoveredKey = inside ? index : (hoveredKey == index ? nil : hoveredKey)
+    }
     private func mappingRow(index: Int, title: String) -> some View {
-        ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, action: $model.draft.tabletButtons[index])
+        ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.tabletButtons[index])
             .onChange(of: model.draft.tabletButtons[index]) { _, _ in selectedKey = index }
             .contentShape(Rectangle())
-            .onHover { inside in hoveredKey = inside ? index : nil }
+            .onHover { updateHover(index, $0) }
     }
 }
 
@@ -132,6 +166,7 @@ private struct ExpressKeyDiagram: View {
     let ring: Int?
     let actions: [ButtonAction]
     let ringCustomized: Bool
+    let hover: (Int, Bool) -> Void
     let select: (Int) -> Void
 
     // Hit regions in the shared 479 × 264 viewBox of the two supplied close-ups.
@@ -154,22 +189,36 @@ private struct ExpressKeyDiagram: View {
                     }
                     if selected == index {
                         RoundedRectangle(cornerRadius: index == 0 ? 18 : 4)
-                            .strokeBorder(Color.primary.opacity(0.55), lineWidth: 1.5)
+                            .strokeBorder(Color.accentColor, lineWidth: 1.5)
                             .frame(width: (rect.width + 6) * scale, height: (rect.height + 6) * scale)
                             .offset(x: (rect.minX - 3) * scale, y: (rect.minY - 3) * scale)
                             .allowsHitTesting(false)
                     }
-                    Button { select(index) } label: { Color.clear.contentShape(Rectangle()) }
-                        .buttonStyle(.plain)
-                        .frame(width: (rect.width + 8) * scale, height: (rect.height + 4) * scale)
-                        .offset(x: (rect.minX - 4) * scale, y: (rect.minY - 2) * scale)
-                        .accessibilityLabel(index == 0 ? "Ring center" : "ExpressKey \(index)")
-                        .accessibilityValue(down ? "Pressed" : (selected == index ? "Selected" : "Released"))
+
                 }
                 if (ringCustomized || ring != nil), let image = TabletArtwork.ringOverlay {
                     Image(nsImage: image).resizable().scaledToFit()
                         .hueRotation(.degrees(ring != nil ? -85 : 0)).allowsHitTesting(false)
                 }
+                // Use layout padding rather than offset hit regions so native hover
+                // tracking and the SVG controls occupy the same coordinates.
+                let order = [1, 2, 3, 4, 0, 5, 6, 7, 8]
+                VStack(spacing: 0) {
+                    ForEach(Array(order.enumerated()), id: \.element) { position, index in
+                        let rect = region(index)
+                        let previousBottom = position == 0 ? -2 : region(order[position - 1]).maxY
+                        let down = pressed & (1 << index) != 0
+                        Button { select(index) } label: {
+                            Color.clear.frame(width: (rect.width + 8) * scale, height: (rect.height + 4) * scale)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .onHover { hover(index, $0) }
+                        .accessibilityLabel(index == 0 ? "Ring center" : "ExpressKey \(index)")
+                        .accessibilityValue(down ? "Pressed" : (selected == index ? "Selected" : "Released"))
+                        .padding(.top, max(0, rect.minY - previousBottom - 4) * scale)
+                    }
+                }.frame(width: 37 * scale).padding(.leading, 28 * scale)
             }
             .frame(width: 479 * scale, height: 264 * scale)
             .clipShape(UnevenRoundedRectangle(bottomTrailingRadius: 12, topTrailingRadius: 12))

@@ -66,6 +66,86 @@ func checkSettingsAndButtons() throws {
     assert(mapper.pen(3).map(\.type) == [.keyDown, .keyUp])
     assert(mapper.releaseAll().map(\.type) == [.flagsChanged])
     assert(mapper.flags.isEmpty)
+    // Touch toggle is a driver action, not a synthetic key, and fires once per press.
+    settings = DriverSettings()
+    settings.penButtons[0] = .toggleTouch
+    settings.tabletButtons[1] = .toggleTouch
+    mapper.configure(settings)
+    var toggles = 0
+    mapper.onToggleTouch = { toggles += 1 }
+    assert(mapper.pen(1).isEmpty && toggles == 0, "Paused input must not toggle touch")
+    _ = mapper.releaseAll()
+    mapper.posting = true
+    assert(mapper.pen(1).isEmpty && toggles == 1)
+    assert(mapper.pen(1).isEmpty && toggles == 1, "Held reports must not toggle repeatedly")
+    assert(mapper.pad(2).isEmpty && toggles == 1, "Shared actions remain held across sources")
+    _ = mapper.pen(0); _ = mapper.pad(0)
+    assert(mapper.pad(2).isEmpty && toggles == 2)
+    _ = mapper.releaseAll()
+    mapper.posting = false
+    try SettingsFile.write(settings, to: url)
+    let toggleSettings = try SettingsFile.read(url)
+    assert(toggleSettings.penButtons[0] == .toggleTouch)
+    let toggleSession = TabletSession(logging: false)
+    toggleSession.configure(settings)
+    toggleSession.buttons.posting = true // Only the non-event toggle action is assigned.
+    var enabledStates: [Bool] = []
+    toggleSession.onTouchEnabledChanged = { enabledStates.append($0) }
+    _ = toggleSession.buttons.pad(2)
+    assert(toggleSession.touch.settings.enabled)
+    _ = toggleSession.buttons.pad(2)
+    _ = toggleSession.buttons.pad(0)
+    _ = toggleSession.buttons.pad(2)
+    assert(!toggleSession.touch.settings.enabled && enabledStates == [true, false])
+    for (level, icon) in [(0, "10"), (10, "10"), (11, "20"), (20, "20"), (21, "50"), (50, "50"), (51, "80"), (80, "80"), (81, "full"), (100, "full")] {
+        assert(TabletPowerStatus(wirelessModuleInstalled: true, batteryPercent: level, charging: false).batteryIcon == "battery-status-" + icon)
+    }
+    assert(TabletPowerStatus(wirelessModuleInstalled: true, batteryPercent: 100, charging: true).batteryIcon == "battery-status-charging")
+    assert(TabletPowerStatus(wirelessModuleInstalled: true, batteryPercent: nil, charging: nil).batteryIcon == "battery-status-10-1")
+    assert(TabletPowerStatus(wirelessModuleInstalled: false, batteryPercent: nil, charging: nil).batteryIcon == nil)
+    // Profiles are independent local JSON files and survive settings backups.
+    let profiles = PressureProfileStore(directory: directory.appendingPathComponent("profiles"))
+    let firm = PressureProfile(name: "Firm", sensitivity: 0.2, contactThreshold: 120)
+    let soft = PressureProfile(name: "Soft", sensitivity: 0.8, contactThreshold: 20)
+    let emptyProfiles = try profiles.load()
+    assert(emptyProfiles.isEmpty)
+    try profiles.save(soft); try profiles.save(firm)
+    let listedProfiles = try profiles.load()
+    assert(listedProfiles.map(\.name) == ["Firm", "Soft"])
+    assert(PressureProfile.next(in: [], after: nil) == nil)
+    assert(PressureProfile.next(in: listedProfiles, after: nil) == firm)
+    assert(PressureProfile.next(in: listedProfiles, after: firm.id) == soft)
+    assert(PressureProfile.next(in: listedProfiles, after: soft.id) == firm)
+    assert(PressureProfile.next(in: listedProfiles, after: UUID()) == firm)
+    var profileSettings = DriverSettings()
+    firm.apply(to: &profileSettings)
+    assert(profileSettings.sensitivity == 0.2 && profileSettings.contactThreshold == 120 && profileSettings.pressureProfileID == firm.id)
+    profileSettings.pressureProfiles = listedProfiles
+    try SettingsFile.write(profileSettings, to: url)
+    let profileBackup = try SettingsFile.read(url)
+    assert(profileBackup.pressureProfiles == listedProfiles)
+    var broken = firm; broken.sensitivity = .nan
+    do { try profiles.save(broken); assertionFailure("Invalid profile accepted") } catch { }
+    let preservedProfiles = try profiles.load()
+    assert(preservedProfiles == listedProfiles, "Invalid saves must preserve profile files")
+    profileSettings.pressureProfiles = [firm, firm]
+    do { try profileSettings.validate(); assertionFailure("Duplicate imported profile IDs accepted") } catch { }
+    mapper.configure(DriverSettings())
+    var cycles = 0
+    mapper.onCyclePressureProfile = { cycles += 1 }
+    settings = DriverSettings(); settings.tabletButtons[1] = .cyclePressureProfile
+    mapper.configure(settings)
+    assert(mapper.pad(2).isEmpty && cycles == 0)
+    _ = mapper.releaseAll(); mapper.posting = true
+    assert(mapper.pad(2).isEmpty && cycles == 1)
+    assert(mapper.pad(2).isEmpty && cycles == 1)
+    _ = mapper.pad(0)
+    assert(mapper.pad(2).isEmpty && cycles == 2)
+    _ = mapper.releaseAll(); mapper.posting = false
+    let profileSession = TabletSession(logging: false)
+    profileSession.configure(settings)
+    profileSession.applyPressureProfile(soft)
+    assert(profileSession.output.settings.sensitivity == soft.sensitivity && profileSession.output.contactThreshold == soft.contactThreshold)
     // Ring positions and wraparound are taken from the captured physical device.
     settings = DriverSettings()
     mapper.configure(settings)

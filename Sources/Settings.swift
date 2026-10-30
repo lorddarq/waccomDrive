@@ -3,7 +3,7 @@ import CoreGraphics
 import ColorSync
 
 enum ButtonAction: String, Codable, CaseIterable, Identifiable {
-    case none, rightClick, middleClick, undo, redo, brush, eraser, brushSmaller, brushLarger, space, shift, option, command, control
+    case none, rightClick, middleClick, undo, redo, brush, eraser, brushSmaller, brushLarger, space, shift, option, command, control, toggleTouch, cyclePressureProfile
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -21,6 +21,8 @@ enum ButtonAction: String, Codable, CaseIterable, Identifiable {
         case .option: "Option"
         case .command: "Command"
         case .control: "Control"
+        case .toggleTouch: "Touch on/off"
+        case .cyclePressureProfile: "Cycle pressure profiles"
         }
     }
 }
@@ -46,6 +48,9 @@ struct DriverSettings: Codable, Equatable {
     var areaX = 0.0, areaY = 0.0, areaWidth = 1.0, areaHeight = 1.0
     var sensitivity = 0.5
     var contactThreshold = 10
+    var pressureProfileID: UUID?
+    // Profile payload is used in backups/imports; live profiles have individual JSON files.
+    var pressureProfiles: [PressureProfile]?
     var penButtons: [ButtonAction] = [.none, .none]
     // Index 0: ring center switch; 1...8: ExpressKeys.
     var tabletButtons = Array(repeating: ButtonAction.none, count: 9)
@@ -63,7 +68,17 @@ struct DriverSettings: Codable, Equatable {
         set { surfaceTouch = newValue }
     }
 
+    static func validatePressure(sensitivity: Double, contactThreshold: Int) throws {
+        guard sensitivity.isFinite, (0...1).contains(sensitivity), (0...2046).contains(contactThreshold) else {
+            throw SettingsError.invalid("Pressure sensitivity or tip activation is outside its allowed range.")
+        }
+    }
     func validate() throws {
+        try Self.validatePressure(sensitivity: sensitivity, contactThreshold: contactThreshold)
+        if let profiles = pressureProfiles {
+            guard Set(profiles.map(\.id)).count == profiles.count else { throw SettingsError.invalid("Duplicate pressure profile IDs.") }
+            for profile in profiles { try profile.validate() }
+        }
         guard version == 1 else { throw SettingsError.invalid("This settings version is not supported.") }
         guard penButtons.count == 2, tabletButtons.count == 9 else {
             throw SettingsError.invalid("Expected two pen buttons and nine tablet buttons.")
@@ -74,8 +89,7 @@ struct DriverSettings: Codable, Equatable {
         guard (1...18).contains(ringSettings.stepsPerShortcut) else {
             throw SettingsError.invalid("Touch-ring response is outside its allowed range.")
         }
-        guard sensitivity.isFinite, (0...1).contains(sensitivity), (0...2046).contains(contactThreshold),
-              [areaX, areaY, areaWidth, areaHeight].allSatisfy(\.isFinite),
+        guard [areaX, areaY, areaWidth, areaHeight].allSatisfy(\.isFinite),
               areaX >= 0, areaY >= 0, areaWidth >= 0.05, areaHeight >= 0.05,
               areaX + areaWidth <= 1.000001, areaY + areaHeight <= 1.000001,
               displayUUID.isEmpty || UUID(uuidString: displayUUID) != nil else {

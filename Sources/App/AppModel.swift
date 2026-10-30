@@ -10,6 +10,7 @@ import ServiceManagement
 @MainActor
 final class AppModel: NSObject, ObservableObject {
     @Published var draft = DriverSettings()
+    @Published private(set) var pressureProfiles: [PressureProfile] = []
     @Published private(set) var saved = DriverSettings()
     @Published private(set) var usbInterfaces = 0
     @Published private(set) var wireless: WirelessStatus?
@@ -28,6 +29,7 @@ final class AppModel: NSObject, ObservableObject {
     @Published var error: String?
     @Published var message = "Settings are stored locally on this Mac."
     private let file = SettingsFile()
+    private let profileStore = PressureProfileStore()
     private let session = TabletSession(logging: false)
     private var receiverTimer: Timer?
     private var lastPreview = 0.0
@@ -35,6 +37,7 @@ final class AppModel: NSObject, ObservableObject {
     private var activationObserver: NSObjectProtocol?
     var installed: Bool { Bundle.main.bundleURL.standardizedFileURL.path == "/Applications/WaccomDrive.app" }
     var dirty: Bool { draft != saved }
+    var selectedPressureProfile: PressureProfile? { pressureProfiles.first { $0.id == draft.pressureProfileID } }
     var settingsPath: String { file.url.path }
     var connectionKind: TabletHardware.ConnectionKind {
         TabletHardware.connectionKind(tablet: tabletHardware, receiverPresent: receiverPresent)
@@ -67,11 +70,12 @@ final class AppModel: NSObject, ObservableObject {
             do { draft = try SettingsFile.read(file.url); saved = draft }
             catch { self.error = "Saved settings could not be loaded: \(error.localizedDescription). The file has been preserved." }
         }
+        do { pressureProfiles = try profileStore.load() }
+        catch { self.error = "Could not load pressure profiles: \(error.localizedDescription)" }
         session.configure(saved)
         session.onConnection = { [weak self] count, _ in
             self?.usbInterfaces = count
-            self?.refreshReceiver()
-            self?.resumeDriverIfRequested()
+            self?.refreshInputState()
         }
         session.onPen = { [weak self] sample in
             guard let self else { return }
@@ -83,10 +87,7 @@ final class AppModel: NSObject, ObservableObject {
         session.onWireless = { [weak self] status in
             guard let self else { return }
             wireless = status
-            refreshReceiver()
-            if !inputAvailable {
-                session.setPosting(false); running = false
-            } else { resumeDriverIfRequested() }
+            refreshInputState()
         }
         session.onPower = { [weak self] in self?.power = $0 }
         session.onPad = { [weak self] in self?.pad = $0 }
@@ -94,6 +95,21 @@ final class AppModel: NSObject, ObservableObject {
             guard let self else { return }
             if touchContacts != count { touchContacts = count }
             if touchStatus != status { touchStatus = status }
+        }
+        session.onCyclePressureProfile = { [weak self] in self?.cyclePressureProfile() }
+        session.onTouchEnabledChanged = { [weak self] enabled in
+            guard let self else { return }
+            // Persist only the physical toggle; preserve unrelated unsaved edits.
+            var next = saved
+            next.touchSettings.enabled = enabled
+            draft.touchSettings.enabled = enabled
+            do {
+                try SettingsFile.write(next, to: file.url)
+                saved = next
+                message = enabled ? "Surface touch on." : "Surface touch off."
+            } catch {
+                self.error = "Touch changed, but could not be saved: \(error.localizedDescription). Save & Apply to retry."
+            }
         }
         session.onError = { [weak self] in self?.error = $0 }
         refreshScreens()
@@ -104,7 +120,7 @@ final class AppModel: NSObject, ObservableObject {
             MainActor.assumeIsolated {
                 if let self {
                     self.refreshLoginStatus()
-                    if self.usbInterfaces == 0 { self.retryUSB() }
+                    if !self.inputAvailable { self.retryUSB() }
                 }
             }
         }
@@ -138,6 +154,12 @@ final class AppModel: NSObject, ObservableObject {
         }
         // Terminal provides the confirmation and administrator authentication.
         guard NSWorkspace.shared.open(script) else { error = "Could not open the uninstaller in Terminal."; return }
+    }
+    private func refreshInputState() {
+        refreshReceiver()
+        if !inputAvailable {
+            session.setPosting(false); running = false
+        } else { resumeDriverIfRequested() }
     }
     private func resumeDriverIfRequested() {
         guard !running, inputAvailable, UserDefaults.standard.bool(forKey: "driverEnabled"), CGPreflightPostEventAccess() else { return }
@@ -196,11 +218,59 @@ final class AppModel: NSObject, ObservableObject {
         UserDefaults.standard.set(true, forKey: "driverEnabled")
         message = "Driver active. Changes take effect when you Save & Apply."
     }
+    func savePressureProfile(name: String, updating: Bool = false) {
+        let current = selectedPressureProfile
+        let title = (updating ? current?.name ?? name : name).trimmingCharacters(in: .whitespacesAndNewlines)
+        let profile = PressureProfile(id: updating ? current?.id ?? UUID() : UUID(), name: title,
+                                      sensitivity: draft.sensitivity, contactThreshold: draft.contactThreshold)
+        do {
+            guard !pressureProfiles.contains(where: { $0.id != profile.id && $0.name.caseInsensitiveCompare(title) == .orderedSame }) else {
+                throw SettingsError.invalid("A pressure profile with this name already exists.")
+            }
+            try profileStore.save(profile)
+            pressureProfiles = try profileStore.load()
+            draft.pressureProfileID = profile.id
+            message = "Pressure profile saved locally. Save & Apply to activate settings."
+        } catch { self.error = error.localizedDescription }
+    }
+    func selectPressureProfile(_ id: UUID?) {
+        draft.pressureProfileID = id
+        pressureProfiles.first { $0.id == id }?.apply(to: &draft)
+    }
+    func deletePressureProfile() {
+        guard let id = draft.pressureProfileID else { return }
+        do {
+            try profileStore.delete(id)
+            pressureProfiles = try profileStore.load()
+            draft.pressureProfileID = nil
+            message = "Pressure profile moved to Trash."
+        } catch { self.error = error.localizedDescription }
+    }
+    func showPressureProfiles() { NSWorkspace.shared.open(profileStore.directory) }
+    private func cyclePressureProfile() {
+        guard let profile = PressureProfile.next(in: pressureProfiles, after: saved.pressureProfileID) else { return }
+        var next = saved
+        profile.apply(to: &next)
+        do {
+            try SettingsFile.write(next, to: file.url)
+            session.applyPressureProfile(profile)
+            saved = next
+            profile.apply(to: &draft)
+            message = "Pressure profile: \(profile.name)"
+        } catch { self.error = "Could not activate pressure profile: \(error.localizedDescription)" }
+    }
     func save() {
         do {
-            try SettingsFile.write(draft, to: file.url)
-            session.configure(draft)
-            saved = draft
+            try draft.validate()
+            if let imported = draft.pressureProfiles {
+                for profile in imported { try profileStore.save(profile) }
+                pressureProfiles = try profileStore.load()
+            }
+            var next = draft
+            next.pressureProfiles = nil
+            try SettingsFile.write(next, to: file.url)
+            session.configure(next)
+            saved = next; draft = next
             message = "Settings saved and applied."
         } catch { self.error = "Could not save settings: \(error.localizedDescription). Previous settings remain active." }
     }
@@ -210,7 +280,12 @@ final class AppModel: NSObject, ObservableObject {
         panel.allowedContentTypes = [.json]
         panel.nameFieldStringValue = "WaccomDrive-settings.json"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do { try SettingsFile.write(saved, to: url); message = "Backup saved to \(url.lastPathComponent)." }
+        do {
+            var backup = saved
+            backup.pressureProfiles = pressureProfiles
+            try SettingsFile.write(backup, to: url)
+            message = "Backup saved to \(url.lastPathComponent)."
+        }
         catch { self.error = error.localizedDescription }
     }
     func importSettings() {

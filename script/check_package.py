@@ -58,9 +58,10 @@ with tempfile.TemporaryDirectory(prefix='waccom-package-check-') as temporary:
             if image is not None:
                 bundled = asset_root / 'tablet' / image
                 assert bundled.read_bytes() == (root / 'assets/tablet' / image).read_bytes(), image
-    for image in (root / 'assets/connection').glob('*.svg'):
-        location = image.relative_to(root)
-        assert (app / 'Contents/Resources' / location).read_bytes() == (root / location).read_bytes()
+    for directory in ('connection', 'battery'):
+        for image in (root / 'assets' / directory).glob('*.svg'):
+            location = image.relative_to(root)
+            assert (app / 'Contents/Resources' / location).read_bytes() == image.read_bytes()
     assert package_info.get('identifier') == 'local.waccomDrive.pkg'
     assert package_info.get('relocatable') == 'false', 'Updates must not relocate into a development checkout'
     assert len(package_info.find('relocate')) == 0

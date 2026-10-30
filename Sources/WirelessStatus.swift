@@ -1,6 +1,7 @@
 import Foundation
 
-// Receiver monitor report, verified against a live 056A:0084 capture and upstream Wacom protocol.
+// Receiver monitor report, verified against a live 056A:0084 capture.
+// Protocol reference: https://github.com/torvalds/linux/blob/master/drivers/hid/wacom_wac.c (wacom_wireless_irq).
 struct WirelessStatus: Equatable {
     let connected: Bool
     let productID: Int

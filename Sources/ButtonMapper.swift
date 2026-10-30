@@ -13,6 +13,8 @@ struct PadSample: Equatable {
 }
 
 final class ButtonMapper {
+    var onCyclePressureProfile: (() -> Void)?
+    var onToggleTouch: (() -> Void)?
     var posting = false
     var location = CGPoint.zero
     private var active: Set<ButtonAction> = []
@@ -83,6 +85,14 @@ final class ButtonMapper {
         }
     }
     private func makeEvents(_ action: ButtonAction, down: Bool) -> [CGEvent] {
+        if action == .cyclePressureProfile {
+            if down && posting { onCyclePressureProfile?() }
+            return []
+        }
+        if action == .toggleTouch {
+            if down && posting { onToggleTouch?() }
+            return []
+        }
         if let modifier = Self.modifier(action) {
             guard let event = CGEvent(keyboardEventSource: nil, virtualKey: modifier.0, keyDown: down) else { return [] }
             event.type = .flagsChanged

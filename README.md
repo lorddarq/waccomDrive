@@ -8,13 +8,13 @@ A native macOS USB driver and settings app for the Wacom Intuos Pro Large PTH-85
 
 - Pen input with pressure, tilt, eraser detection, and configurable side buttons.
 - Display mapping, tablet active area, rotation, and optional aspect-ratio preservation.
-- Pressure sensitivity and tip activation controls.
-- Eight ExpressKeys and ring-center button mapping with a visual tablet diagram.
+- Pressure sensitivity and tip activation controls, with named local JSON profiles and button-driven cycling.
+- Eight ExpressKeys and ring-center button mapping with a visual tablet diagram, including Touch on/off.
 - Touch-ring brush-size control with direction and response settings.
 - Surface touch on/off, one-finger pointer/tap, and two-finger scrolling.
 - Pen-range palm rejection while the driver is active.
 - USB receiver detection and tablet-reported connection capabilities.
-- Wireless-module detection, battery percentage, and charging status over USB.
+- Wireless-module detection, battery percentage, and charging status over USB or the Wacom receiver.
 - Settings save, backup, and import.
 - Menu-bar access without a Dock icon.
 - Installer, uninstaller, and start-at-login option.
@@ -29,13 +29,14 @@ Checklist for the Intuos Pro Large PTH-851/K. Checked items have recorded workin
 - [x] Adjustable pressure sensitivity and tip activation threshold (settings/event checks).
 - [x] Pen tilt X/Y decoding and tablet-event output (decoder checks).
 - [ ] Confirm tilt-sensitive brush behavior in a drawing app.
-- [ ] Confirm physical eraser switching and eraser pressure in a drawing app (tool detection/output implemented).
+- [x] Physical eraser switching and eraser pressure verified in a drawing app.
 - [x] Two pen side-button mappings (event-generation checks).
 - [x] Eight ExpressKeys and ring-center button decoding and action mapping (decoder/event checks).
 - [ ] Verify physical ExpressKey numbering and every button on the tablet.
 - [x] Button actions: right/middle click, undo/redo, brush/eraser shortcuts, brush size, Space/pan, and Shift/Option/Command/Control (mapping implemented; representative event checks).
 - [x] Touch-ring brush-size shortcuts, direction reversal, and response adjustment (event-generation checks).
-- [ ] Verify touch-ring brush-size changes in a drawing app; four selectable ring modes are not implemented.
+- [x] Touch-ring brush-size changes verified in a drawing app over the wireless receiver.
+- [ ] Four selectable ring modes are not implemented.
 - [x] Custom tablet active area, 180° rotation, and aspect-ratio preservation (mapping/settings checks).
 - [ ] Verify display selection and mapped cursor alignment on real single/multiple-display setups.
 - [x] Surface-touch enable/disable, one-finger pointer movement, tap-to-click, and pointer speed (event-generation checks).
@@ -45,7 +46,8 @@ Checklist for the Intuos Pro Large PTH-851/K. Checked items have recorded workin
 - [ ] Pinch-to-zoom, rotation, and additional macOS trackpad gestures (not implemented).
 - [x] Wireless-module presence, battery percentage, and charging-status decoding over USB (captured-report checks).
 - [ ] Verify battery/charging updates across a live charge/discharge cycle.
-- [ ] Wireless tablet input through the Wacom USB receiver (receiver detection only).
+- [x] Wacom USB receiver report decoding: pen, all eight ExpressKeys, ring, touch, battery, and disconnect cleanup (captured-report replay).
+- [x] Wireless pen input and basic touch (pointer, tap-to-click, two-finger scrolling) confirmed on the PTH-851 receiver.
 - [ ] Verify receiver disconnect/reconnect and wireless input recovery end to end.
 - [ ] Verify pen, buttons, and gestures in drawing apps beyond Krita.
 
@@ -55,8 +57,8 @@ Checklist for the Intuos Pro Large PTH-851/K. Checked items have recorded workin
 - Installer targets arm64; Intel Macs and universal builds are unsupported.
 - Developed with Swift 6.4 and Apple's macOS SDK/tools.
 - Tested device: Intuos Pro Large PTH-851/K, USB ID `056A:0317` (`Intuos5 touch L`). Other models are unverified.
-- Direct USB input only. Wireless receiver detection does not provide wireless tablet input.
-- Basic pen input tested in Krita; other apps and later mapping, ring, and touch features need further testing.
+- Supports the tested PTH-851 over direct USB or Wacom receiver `056A:0084`; other paired models are rejected. Native Bluetooth input is unsupported.
+- Basic pen input tested in Krita; wireless pen, basic touch, and touch-ring brush-size changes verified. Other apps and advanced mapping still need testing.
 - No pinch, rotation, or full macOS trackpad gestures.
 - Palm rejection requires exclusive touch-interface access and an active driver.
 - Concurrent use with other tablet drivers is unverified.
@@ -96,6 +98,8 @@ WACCOM_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./script/bui
 ## Settings and diagnostics
 
 - Settings: `~/Library/Application Support/WaccomDrive/settings.json`.
+- Pressure profiles: individual JSON files in `~/Library/Application Support/WaccomDrive/PressureProfiles/`. Manage them on Pen; backups include profiles.
+- Assign Cycle pressure profiles after creating profiles. Each press advances through the displayed list and applies it immediately.
 - Save & Apply activates changes; imported settings require Save & Apply.
 - Brush-size actions use the drawing app's `[` and `]` shortcuts.
 - CLI device inventory: `build/waccom-capture --probe`.

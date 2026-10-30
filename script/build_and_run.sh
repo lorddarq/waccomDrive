@@ -14,6 +14,8 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/
 mv "$ROOT_DIR/build/waccom-capture.new" "$ROOT_DIR/build/waccom-capture"
 "$ROOT_DIR/build/waccom-capture" --self-check
 xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/WacomReceiver.swift script/check_tablet_hardware.swift -o "$ROOT_DIR/build/check-tablet-hardware"
+xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/Pen.swift Sources/PenOutput.swift Sources/ButtonMapper.swift Sources/Touch.swift Sources/TabletPowerStatus.swift Sources/WacomReceiver.swift Sources/WirelessStatus.swift Sources/TabletSession.swift Sources/Settings.swift Sources/PressureProfile.swift script/check_wireless.swift -o "$ROOT_DIR/build/check-wireless"
+"$ROOT_DIR/build/check-wireless" captures/wireless-receiver.txt
 "$ROOT_DIR/build/check-tablet-hardware"
 "$ROOT_DIR/build/waccom-capture" --replay=captures/first-session-excerpt.txt
 "$ROOT_DIR/build/waccom-capture" --replay=captures/touch-ring.txt
@@ -40,7 +42,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 PLIST
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Resources/assets"
-cp -R "$ROOT_DIR/assets/tablet" "$ROOT_DIR/assets/connection" "$APP_BUNDLE/Contents/Resources/assets/"
+cp -R "$ROOT_DIR/assets/tablet" "$ROOT_DIR/assets/connection" "$ROOT_DIR/assets/battery" "$APP_BUNDLE/Contents/Resources/assets/"
 cp "$ROOT_DIR/packaging/Uninstall WaccomDrive.command" "$APP_BUNDLE/Contents/Resources/Uninstall WaccomDrive.command"
 "$ROOT_DIR/script/sign.sh" "$APP_BUNDLE"
 case "$MODE" in

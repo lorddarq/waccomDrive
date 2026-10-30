@@ -19,6 +19,18 @@ struct TabletPowerStatus: Equatable {
         return TabletPowerStatus(wirelessModuleInstalled: true, batteryPercent: percent, charging: charging)
     }
 
+    var batteryIcon: String? {
+        guard wirelessModuleInstalled else { return nil }
+        if charging == true { return "battery-status-charging" }
+        guard let batteryPercent else { return "battery-status-10-1" }
+        switch batteryPercent {
+        case ...10: return "battery-status-10"
+        case ...20: return "battery-status-20"
+        case ...50: return "battery-status-50"
+        case ...80: return "battery-status-80"
+        default: return "battery-status-full"
+        }
+    }
     var batteryDescription: String {
         batteryPercent.map { "\($0)%" } ?? (wirelessModuleInstalled ? "Not reported" : "Unavailable")
     }
