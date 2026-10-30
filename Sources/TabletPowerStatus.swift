@@ -37,6 +37,6 @@ struct TabletPowerStatus: Equatable {
     var chargingDescription: String {
         guard let charging else { return "Unavailable" }
         if charging { return "Charging" }
-        return batteryPercent == 100 ? "Fully charged" : "Not charging"
+        return "Discharging"
     }
 }

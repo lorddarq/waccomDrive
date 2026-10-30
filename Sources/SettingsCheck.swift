@@ -279,7 +279,10 @@ func checkSettingsAndButtons() throws {
     var earlier = chargingPacket; earlier[8] = 0x90
     assert(TabletPowerStatus.decode(earlier)?.batteryPercent == 51)
     var full = chargingPacket; full[8] = 31
-    assert(TabletPowerStatus.decode(full)?.chargingDescription == "Fully charged")
+    assert(TabletPowerStatus.decode(full)?.chargingDescription == "Discharging")
+    assert(TabletPowerStatus.fromBatteryByte(29, moduleInstalled: true).chargingDescription == "Discharging")
+    assert(TabletPowerStatus.fromBatteryByte(0x80 | 29, moduleInstalled: true).chargingDescription == "Charging")
+    assert(TabletPowerStatus.fromBatteryByte(29, moduleInstalled: false).chargingDescription == "Unavailable")
     var discharging = chargingPacket; discharging[8] = 15
     assert(TabletPowerStatus.decode(discharging)?.charging == false)
     assert(TabletPowerStatus.decode(discharging)?.batteryPercent == 48)
