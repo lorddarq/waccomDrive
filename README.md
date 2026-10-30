@@ -20,6 +20,20 @@ A native macOS USB driver and settings app for the Wacom Intuos Pro Large PTH-85
 - Menu-bar access without a Dock icon.
 - Installer, uninstaller, and start-at-login option.
 
+## Screenshots
+
+| Connection and battery | Display and tablet mapping |
+| --- | --- |
+| ![Overview with wireless connection, battery status, and live pen input](previews/screenshots/overview.png) | ![Tablet active area and display mapping](previews/screenshots/mapping.png) |
+
+| Pen pressure profiles | ExpressKey customization |
+| --- | --- |
+| ![Pen pressure profiles, sensitivity curve, and live response](previews/screenshots/pen.png) | ![ExpressKey assignments with highlighted tablet controls](previews/screenshots/expresskeys.png) |
+
+| Touch and palm rejection | Settings and installation |
+| --- | --- |
+| ![Surface touch, tap to click, pointer speed, and palm rejection](previews/screenshots/touch.png) | ![Installation, startup, saved settings, and backup controls](previews/screenshots/settings.png) |
+
 ## What works
 
 Checklist for the Intuos Pro Large PTH-851/K. Checked items have recorded working behavior or automated checks, as noted. Unchecked items still need implementation or hands-on verification; implemented does not mean verified in a drawing app.
@@ -89,8 +103,10 @@ Checklist for the Intuos Pro Large PTH-851/K. Checked items have recorded workin
 WACCOM_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./script/build_and_run.sh --build
 ```
 
-- For local ad hoc signing, use `WACCOM_SIGN_IDENTITY=-`.
-- Ad hoc rebuilds can require renewed input permissions. Signing does not grant permissions automatically.
+- Forks can build and run locally without the original developer's certificate or a paid Apple Developer account. The build falls back to ad hoc signing when no signing certificate is available.
+- To explicitly use ad hoc signing: `WACCOM_SIGN_IDENTITY=- ./script/build_and_run.sh`.
+- Local builds still require Input Monitoring and Accessibility. Ad hoc rebuilds may require granting those permissions again; signing does not grant them automatically.
+- Ad hoc signing is sufficient for local builds but does not provide Gatekeeper trust for downloaded apps. Developer ID signing and notarization are needed for normal distribution outside the Mac App Store.
 - Distribution app ZIP: `./script/package.sh --signed-app` with a Developer ID Application identity.
 - Distribution installer: `./script/package.sh --release`; also requires Developer ID Installer, selected automatically or through `WACCOM_INSTALLER_IDENTITY`.
 - Downloaded releases also need Apple's notarization process for default Gatekeeper acceptance.
