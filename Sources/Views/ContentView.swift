@@ -31,11 +31,11 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Text("Connection").foregroundStyle(.secondary)
                     HStack(spacing: 4) {
-                        if model.usbInterfaces > 0, let image = TabletArtwork.connectionImage("usb") {
+                        if let icon = model.connectionIcon, let image = TabletArtwork.connectionImage(icon) {
                             Image(nsImage: image).resizable().scaledToFit()
                                 .frame(width: 16, height: 16).accessibilityHidden(true)
                         }
-                        Text(model.usbInterfaces > 0 ? "USB Cable" : "Disconnected")
+                        Text(model.connectionDescription)
                     }
                     if model.usbIssue != nil { Text("USB access unavailable").foregroundStyle(.orange) }
                 }
@@ -84,23 +84,35 @@ struct ContentView: View {
                     TabletAsset(name: "base").frame(width: 238, height: 254)
                     GroupBox {
                         VStack(spacing: 12) {
-                            statusRow("Model", "PTH-851/K")
-                            statusRow("Tablet", model.usbInterfaces > 0 ? "Connected over USB" : "Not connected")
+                            if let tablet = model.tabletHardware {
+                                statusRow("Model", tablet.name)
+                                if let serial = tablet.serial { statusRow("Serial No", serial) }
+                            }
+                            statusRow("Tablet", model.tabletStatus)
                             if let issue = model.usbIssue {
                                 Label(issue, systemImage: "hand.raised").font(.callout).foregroundStyle(.orange)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                             }
-                            statusRow("Wireless receiver", model.receiverPresent ? "Receiver detected · wireless input not enabled" : "Not detected")
-                            statusRow("Tablet wireless module", model.power.map { $0.wirelessModuleInstalled ? "Installed" : "Not installed" } ?? "Waiting for tablet status")
-                            HStack {
-                                Text("Mac Bluetooth"); Spacer(); Text(model.bluetooth).foregroundStyle(.secondary)
-                                Button("Check") { model.checkBluetooth() }.controlSize(.small)
+                            switch model.connectionKind {
+                            case .bluetooth:
+                                statusRow("Tablet Bluetooth", model.tabletHardware?.bluetoothConnected == true ? "Connected" : "Capability reported")
+                            case .receiver:
+                                statusRow("Wireless receiver", "Detected · 056A:0084")
+                            case .usb:
+                                statusRow("Connection", "USB")
                             }
-                            Divider()
-                            Text("The PTH-851 uses a Wacom wireless module and USB receiver. Module presence and Mac Bluetooth power do not confirm a wireless tablet connection.")
-                                .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                            if let power = model.power {
+                                statusRow("Tablet wireless module", power.wirelessModuleInstalled ? "Installed" : "Not installed")
+                            }
+                            if model.connectionKind != .usb {
+                                Divider()
+                                Text(model.connectionKind == .receiver ?
+                                     (model.wireless?.supported == true ? "Wireless pen, tablet buttons, and touch use the saved driver settings." : "Switch on the tablet to establish its wireless link.") :
+                                     "Bluetooth capability is reported by the tablet. Driver input currently requires the supported tablet over USB.")
+                                    .font(.caption).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                            }
                             HStack {
-                                Button("Retry USB") { model.retryUSB() }
+                                Button("Refresh devices") { model.retryUSB() }
                                 Spacer()
                                 Button(model.running ? "Pause driver" : "Start driver") { model.toggleDriver() }
                                     .buttonStyle(.borderedProminent)
@@ -109,11 +121,13 @@ struct ContentView: View {
                     }
                 }
                 HStack(alignment: .top, spacing: 16) {
-                    GroupBox("Battery and charging") {
-                        VStack(spacing: 12) {
-                            statusRow("Battery charge", model.power?.batteryDescription ?? "Not reported")
-                            statusRow("Charging status", model.power?.chargingDescription ?? "Not reported")
-                        }.padding(10)
+                    if let power = model.power, power.wirelessModuleInstalled {
+                        GroupBox("Battery and charging") {
+                            VStack(spacing: 12) {
+                                statusRow("Battery charge", power.batteryDescription)
+                                statusRow("Charging status", power.chargingDescription)
+                            }.padding(10)
+                        }
                     }
                     GroupBox("Live pen input") {
                         VStack(alignment: .leading, spacing: 10) {

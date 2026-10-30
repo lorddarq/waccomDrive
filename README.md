@@ -13,10 +13,41 @@ A native macOS USB driver and settings app for the Wacom Intuos Pro Large PTH-85
 - Touch-ring brush-size control with direction and response settings.
 - Surface touch on/off, one-finger pointer/tap, and two-finger scrolling.
 - Pen-range palm rejection while the driver is active.
+- USB receiver detection and tablet-reported connection capabilities.
 - Wireless-module detection, battery percentage, and charging status over USB.
 - Settings save, backup, and import.
 - Menu-bar access without a Dock icon.
 - Installer, uninstaller, and start-at-login option.
+
+## What works
+
+Checklist for the Intuos Pro Large PTH-851/K. Checked items have recorded working behavior or automated checks, as noted. Unchecked items still need implementation or hands-on verification; implemented does not mean verified in a drawing app.
+
+- [x] Direct USB pen input and basic drawing in Krita.
+- [x] Pen hover/proximity, position, tip contact, dragging, and release (decoder/event checks).
+- [x] Pressure input across the 0–2047 range (decoder/event checks).
+- [x] Adjustable pressure sensitivity and tip activation threshold (settings/event checks).
+- [x] Pen tilt X/Y decoding and tablet-event output (decoder checks).
+- [ ] Confirm tilt-sensitive brush behavior in a drawing app.
+- [ ] Confirm physical eraser switching and eraser pressure in a drawing app (tool detection/output implemented).
+- [x] Two pen side-button mappings (event-generation checks).
+- [x] Eight ExpressKeys and ring-center button decoding and action mapping (decoder/event checks).
+- [ ] Verify physical ExpressKey numbering and every button on the tablet.
+- [x] Button actions: right/middle click, undo/redo, brush/eraser shortcuts, brush size, Space/pan, and Shift/Option/Command/Control (mapping implemented; representative event checks).
+- [x] Touch-ring brush-size shortcuts, direction reversal, and response adjustment (event-generation checks).
+- [ ] Verify touch-ring brush-size changes in a drawing app; four selectable ring modes are not implemented.
+- [x] Custom tablet active area, 180° rotation, and aspect-ratio preservation (mapping/settings checks).
+- [ ] Verify display selection and mapped cursor alignment on real single/multiple-display setups.
+- [x] Surface-touch enable/disable, one-finger pointer movement, tap-to-click, and pointer speed (event-generation checks).
+- [x] Two-finger horizontal/vertical scrolling (event-generation checks).
+- [x] Pen-range palm rejection and lift-to-resume protection (automated checks; requires exclusive touch-interface access).
+- [ ] Verify touch gestures, palm rejection, and the physical touch switch end to end on the tablet.
+- [ ] Pinch-to-zoom, rotation, and additional macOS trackpad gestures (not implemented).
+- [x] Wireless-module presence, battery percentage, and charging-status decoding over USB (captured-report checks).
+- [ ] Verify battery/charging updates across a live charge/discharge cycle.
+- [ ] Wireless tablet input through the Wacom USB receiver (receiver detection only).
+- [ ] Verify receiver disconnect/reconnect and wireless input recovery end to end.
+- [ ] Verify pen, buttons, and gestures in drawing apps beyond Krita.
 
 ## Compatibility and limitations
 

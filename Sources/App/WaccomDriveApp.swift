@@ -55,7 +55,7 @@ private struct StatusMenu: View {
     @Environment(\.openWindow) private var openWindow
     var body: some View {
         Text("Wacom Intuos Pro Large")
-        Text(model.usbInterfaces > 0 ? "USB connected" : "USB disconnected")
+        Text(model.connectionDescription)
         Text(model.running ? "Driver active" : "Driver paused")
         if let power = model.power {
             Text(power.wirelessModuleInstalled ? "Wireless module installed" : "Wireless module not installed")

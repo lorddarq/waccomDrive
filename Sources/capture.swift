@@ -50,6 +50,7 @@ struct Capture {
             fputs("Enable Accessibility for the hosting application, then restart this command.\n", stderr)
             exit(1)
         }
+        print("Wacom wireless receiver: \(WacomReceiver.isPresent() ? "Detected (056A:0084)" : "Not detected")")
         let session = TabletSession(decoded: decoded, posting: posting, threshold: threshold)
         let count: Int
         do { count = try session.start() }

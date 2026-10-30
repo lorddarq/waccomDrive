@@ -13,6 +13,8 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -D APP -module-cache-path "$RO
 xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/*.swift -o "$ROOT_DIR/build/waccom-capture.new"
 mv "$ROOT_DIR/build/waccom-capture.new" "$ROOT_DIR/build/waccom-capture"
 "$ROOT_DIR/build/waccom-capture" --self-check
+xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/WacomReceiver.swift script/check_tablet_hardware.swift -o "$ROOT_DIR/build/check-tablet-hardware"
+"$ROOT_DIR/build/check-tablet-hardware"
 "$ROOT_DIR/build/waccom-capture" --replay=captures/first-session-excerpt.txt
 "$ROOT_DIR/build/waccom-capture" --replay=captures/touch-ring.txt
 "$ROOT_DIR/build/waccom-capture" --replay=captures/touch-surface-retry.txt
@@ -34,7 +36,6 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 <key>LSMinimumSystemVersion</key><string>27.0</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>LSUIElement</key><true/>
-<key>NSBluetoothAlwaysUsageDescription</key><string>Display the Mac Bluetooth radio status when you choose Check. This tablet uses a Wacom wireless receiver.</string>
 </dict></plist>
 PLIST
 mkdir -p "$APP_BUNDLE/Contents/Resources"

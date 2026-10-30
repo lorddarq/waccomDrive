@@ -3,16 +3,17 @@ import SwiftUI
 import AppKit
 import CoreGraphics
 import ColorSync
-import CoreBluetooth
 import IOKit.hid
 import UniformTypeIdentifiers
 import ServiceManagement
 
 @MainActor
-final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManagerDelegate {
+final class AppModel: NSObject, ObservableObject {
     @Published var draft = DriverSettings()
     @Published private(set) var saved = DriverSettings()
     @Published private(set) var usbInterfaces = 0
+    @Published private(set) var wireless: WirelessStatus?
+    @Published private(set) var tabletHardware: TabletHardware?
     @Published private(set) var receiverPresent = false
     @Published private(set) var power: TabletPowerStatus?
     @Published private(set) var running = false
@@ -20,7 +21,6 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
     @Published private(set) var pad = PadSample(buttons: 0, ring: nil)
     @Published private(set) var touchContacts = 0
     @Published private(set) var touchStatus = "Driver paused"
-    @Published private(set) var bluetooth = "Not checked"
     @Published private(set) var screens: [ScreenChoice] = []
     @Published private(set) var usbIssue: String?
     @Published private(set) var loginEnabled = false
@@ -29,13 +29,37 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
     @Published var message = "Settings are stored locally on this Mac."
     private let file = SettingsFile()
     private let session = TabletSession(logging: false)
-    private var bluetoothManager: CBCentralManager?
+    private var receiverTimer: Timer?
     private var lastPreview = 0.0
     private var displayObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
     var installed: Bool { Bundle.main.bundleURL.standardizedFileURL.path == "/Applications/WaccomDrive.app" }
     var dirty: Bool { draft != saved }
     var settingsPath: String { file.url.path }
+    var connectionKind: TabletHardware.ConnectionKind {
+        TabletHardware.connectionKind(tablet: tabletHardware, receiverPresent: receiverPresent)
+    }
+    var inputAvailable: Bool { usbInterfaces > 0 || wireless?.supported == true }
+    var connectionDescription: String {
+        if tabletHardware?.bluetoothConnected == true { return "Bluetooth" }
+        if usbInterfaces > 0 { return "USB Cable" }
+        if wireless?.supported == true { return "Wireless receiver" }
+        if connectionKind == .bluetooth { return "Bluetooth available" }
+        return receiverPresent ? "Receiver detected" : "Disconnected"
+    }
+    var connectionIcon: String? {
+        if tabletHardware?.bluetoothConnected == true { return "bluetooth-on" }
+        if usbInterfaces > 0 { return "usb" }
+        if wireless?.supported == true { return "wifi-full" }
+        return receiverPresent ? "wifi-off" : nil
+    }
+    var tabletStatus: String {
+        if tabletHardware?.bluetoothConnected == true { return "Connected over Bluetooth · input unavailable" }
+        if usbInterfaces > 0 { return "Connected over USB" }
+        if let wireless, wireless.connected { return wireless.supported ? "Connected through receiver" : "Unsupported wireless tablet" }
+        if let tabletHardware { return tabletHardware.productID == 0x0317 ? "Detected · input unavailable" : "Detected · unsupported model" }
+        return receiverPresent ? "Waiting for wireless tablet" : "Not connected"
+    }
 
     override init() {
         super.init()
@@ -44,8 +68,9 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
             catch { self.error = "Saved settings could not be loaded: \(error.localizedDescription). The file has been preserved." }
         }
         session.configure(saved)
-        session.onConnection = { [weak self] count, receiver in
-            self?.usbInterfaces = count; self?.receiverPresent = receiver
+        session.onConnection = { [weak self] count, _ in
+            self?.usbInterfaces = count
+            self?.refreshReceiver()
             self?.resumeDriverIfRequested()
         }
         session.onPen = { [weak self] sample in
@@ -54,6 +79,14 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
             if now - lastPreview >= 0.05 || sample.buttons != pen.buttons || sample.inProximity != pen.inProximity || sample.inRange != pen.inRange {
                 pen = sample; lastPreview = now
             }
+        }
+        session.onWireless = { [weak self] status in
+            guard let self else { return }
+            wireless = status
+            refreshReceiver()
+            if !inputAvailable {
+                session.setPosting(false); running = false
+            } else { resumeDriverIfRequested() }
         }
         session.onPower = { [weak self] in self?.power = $0 }
         session.onPad = { [weak self] in self?.pad = $0 }
@@ -76,6 +109,11 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
             }
         }
         refreshLoginStatus()
+        refreshReceiver()
+        receiverTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshReceiver() }
+        }
+        if let receiverTimer { RunLoop.main.add(receiverTimer, forMode: .common) }
         retryUSB()
     }
 
@@ -102,7 +140,7 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
         guard NSWorkspace.shared.open(script) else { error = "Could not open the uninstaller in Terminal."; return }
     }
     private func resumeDriverIfRequested() {
-        guard !running, usbInterfaces > 0, UserDefaults.standard.bool(forKey: "driverEnabled"), CGPreflightPostEventAccess() else { return }
+        guard !running, inputAvailable, UserDefaults.standard.bool(forKey: "driverEnabled"), CGPreflightPostEventAccess() else { return }
         session.setPosting(true)
         running = true
     }
@@ -117,7 +155,19 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
             return ScreenChoice(id: text, name: screen.localizedName, size: "\(Int(bounds.width)) × \(Int(bounds.height))")
         }
     }
+    private func refreshReceiver() {
+        let present = WacomReceiver.isPresent()
+        if present != receiverPresent { receiverPresent = present }
+        var hardware = TabletHardware.read()
+        if hardware == nil, let wireless, wireless.connected {
+            hardware = TabletHardware(productID: wireless.productID,
+                name: wireless.supported ? "Wacom Intuos Pro Large · PTH-851/K" : String(format: "Wacom tablet · 056A:%04X", wireless.productID),
+                serial: nil, bluetoothCapable: false, bluetoothConnected: false)
+        }
+        if hardware != tabletHardware { tabletHardware = hardware }
+    }
     func retryUSB() {
+        refreshReceiver()
         do { usbInterfaces = try session.start(); usbIssue = nil }
         catch {
             usbIssue = "Tablet input is unavailable. Open Permission Help for setup and troubleshooting."
@@ -140,7 +190,7 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
             message = "Accessibility access is needed to control the pointer. Open Permission Help."
             return
         }
-        guard usbInterfaces > 0 else { error = "Connect the tablet by USB and choose Retry USB."; return }
+        guard inputAvailable else { error = "Connect the tablet by USB, or switch it on with the wireless receiver plugged in, then choose Refresh devices."; return }
         session.setPosting(true)
         running = true
         UserDefaults.standard.set(true, forKey: "driverEnabled")
@@ -176,23 +226,8 @@ final class AppModel: NSObject, ObservableObject, @preconcurrency CBCentralManag
             message = "Imported for review. Save & Apply to use these settings."
         } catch { self.error = "Import rejected: \(error.localizedDescription). Current settings were kept." }
     }
-    func checkBluetooth() {
-        if bluetoothManager == nil {
-            bluetoothManager = CBCentralManager(delegate: self, queue: .main, options: [CBCentralManagerOptionShowPowerAlertKey: false])
-        }
-    }
-    func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        bluetooth = switch central.state {
-        case .poweredOn: "On"
-        case .poweredOff: "Off"
-        case .unauthorized: "Permission not granted"
-        case .unsupported: "Unavailable"
-        case .resetting: "Resetting"
-        case .unknown: "Checking…"
-        @unknown default: "Unknown"
-        }
-    }
     func stop() {
+        receiverTimer?.invalidate(); receiverTimer = nil
         session.stop()
         running = false
         if let displayObserver { NotificationCenter.default.removeObserver(displayObserver) }

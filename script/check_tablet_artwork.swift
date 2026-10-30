@@ -8,7 +8,7 @@ struct ArtworkCheck {
             guard let image = TabletArtwork.image(name) else { fatalError("Missing artwork: \(name)") }
             precondition(image.size.width > 0 && image.size.height > 0)
         }
-        for name in ["usb", "bluetooth-on", "bluetooth-off"] {
+        for name in ["usb", "bluetooth-on", "bluetooth-off", "wifi-full", "wifi-half", "wifi-low", "wifi-off"] {
             precondition(TabletArtwork.connectionImage(name) != nil, "Missing connector SVG: \(name)")
         }
         for key in 0...8 {

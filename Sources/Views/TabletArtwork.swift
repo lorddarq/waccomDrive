@@ -29,7 +29,7 @@ enum TabletArtwork {
     private static let connections: [String: NSImage] = {
         let directory = folder.deletingLastPathComponent().appendingPathComponent("connection")
         var result: [String: NSImage] = [:]
-        for name in ["usb", "bluetooth-on", "bluetooth-off"] {
+        for name in ["usb", "bluetooth-on", "bluetooth-off", "wifi-full", "wifi-half", "wifi-low", "wifi-off"] {
             result[name] = NSImage(contentsOf: directory.appendingPathComponent(name + ".svg"))
         }
         return result
