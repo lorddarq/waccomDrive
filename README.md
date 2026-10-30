@@ -69,3 +69,7 @@ WACCOM_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./script/bui
 - CLI device inventory: `build/waccom-capture --probe`.
 - Decoder and settings checks: `build/waccom-capture --self-check`.
 - Capture replay: `build/waccom-capture --replay=captures/first-session-excerpt.txt`.
+
+## Distribution
+
+You may freely use and build on top of the available source code, as long as you credit back in the license.
