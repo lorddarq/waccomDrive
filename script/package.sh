@@ -20,6 +20,8 @@ mkdir -p "$OUTPUT"
 STAGE="$(mktemp -d "$ROOT_DIR/build/pkg-stage.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/payload/Applications" "$STAGE/resources"
+COVER=cover.png
+if [[ "$MODE" == --local ]]; then COVER=cover-dev.png; fi
 if [[ "$MODE" == --signed-app ]]; then
     if [[ -n "${WACCOM_NOTARY_PROFILE:-}" ]]; then
         ditto -c -k --keepParent "$APP" "$STAGE/notary-input.zip"
@@ -43,14 +45,17 @@ cat > "$STAGE/distribution.xml" <<'XML'
     <options customize="never" require-scripts="false" hostArchitectures="arm64"/>
     <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
     <volume-check script="true"><allowed-os-versions><os-version min="27.0"/></allowed-os-versions></volume-check>
-    <welcome file="Welcome.txt" mime-type="text/plain"/>
+    <welcome file="Welcome.rtfd" mime-type="text/rtfd"/>
+    <readme file="ReadMe.txt" mime-type="text/plain"/>
     <choices-outline><line choice="default"/></choices-outline>
     <choice id="default" visible="false"><pkg-ref id="local.waccomDrive.pkg"/></choice>
     <pkg-ref id="local.waccomDrive.pkg">component.pkg</pkg-ref>
     <pkg-ref id="local.waccomDrive.pkg"><must-close><app id="local.waccomDrive"/></must-close></pkg-ref>
 </installer-gui-script>
 XML
-cat > "$STAGE/resources/Welcome.txt" <<'TEXT'
+# A single-file RTFD embeds a native image attachment and works with productbuild.
+swift -module-cache-path "$ROOT_DIR/build/module-cache" "$ROOT_DIR/script/installer_welcome.swift" "$ROOT_DIR/previews/$COVER" "$STAGE/resources/Welcome.rtfd"
+cat > "$STAGE/resources/ReadMe.txt" <<'TEXT'
 WaccomDrive — Wacom Intuos Pro Large PTH-851/K USB driver
 
 Requires macOS 27 or later on Apple silicon.
@@ -71,7 +76,7 @@ else
 fi
 cp 'packaging/Uninstall WaccomDrive.command' "$OUTPUT/Uninstall WaccomDrive.command"
 chmod +x "$OUTPUT/Uninstall WaccomDrive.command"
-python3 script/check_package.py "$PACKAGE"
+python3 script/check_package.py "$PACKAGE" "$MODE"
 if [[ -n "$INSTALLER_IDENTITY" ]]; then pkgutil --check-signature "$PACKAGE"; fi
 if [[ "$MODE" == --release && -n "${WACCOM_NOTARY_PROFILE:-}" ]]; then
     xcrun notarytool submit "$PACKAGE" "${NOTARY_OPTIONS[@]}" --wait

@@ -3,13 +3,13 @@
 Run from Terminal in the project folder:
 
 ```sh
-./script/capture_tablet.command
+./tools/capture/capture_tablet.command
 # Optional new output directory:
-./script/capture_tablet.command --output "$HOME/Desktop/wacom-capture"
+./tools/capture/capture_tablet.command --output "$HOME/Desktop/wacom-capture"
 ```
 
 - Requires macOS, Apple's Command Line Tools with Swift 6, and Python 3. No Python packages are needed.
-- The launcher builds only the diagnostic executable, then starts the guide. It does not launch, install, or modify the driver app.
+- This directory is self-contained: the launcher builds only its native recorder into `tools/capture/build/`, then starts the guide. It does not launch, install, or modify the driver app.
 - Quit WaccomDrive and other tablet drivers before collecting reports. Connect or pair the tablet normally.
 - Allow Input Monitoring for the terminal/capture tool if macOS requires it, then rerun. Accessibility is not required: the recorder never posts input events.
 - Discovery covers Wacom HID vendor `056A` on every transport exposed by macOS, including models the driver cannot decode. Select the tablet and its receiver by their displayed product IDs. All interfaces with selected IDs are recorded; disconnect duplicate tablets with the same ID to isolate one.
@@ -29,7 +29,7 @@ The guide includes quiet category baselines; touch switch, single/multiple finge
 
 ## Saved files
 
-The default is a unique folder under `captures/session-<UTC date>-<suffix>/`, ignored by Git. Existing output directories are never overwritten.
+The default is a unique folder under `tools/capture/captures/session-<UTC date>-<suffix>/`, ignored by Git. Existing output directories are never overwritten.
 
 - `device.json`: advertised identity, USB IDs, transports, interfaces, raw report descriptors, HID element ranges/units, exposed power properties, descriptor capability evidence, and separate user-reported label/control counts.
 - `session.json`: step instructions, statuses, timestamps, explicit confirmations, notes, selected product IDs, rescans, errors, and recording statistics.
@@ -53,9 +53,9 @@ Raw records are independent of the Large tablet decoder. These files use a new m
 ## Checks and direct commands
 
 ```sh
-python3 script/check_capture_wizard.py
-build/waccom-capture --hid-inventory
-build/waccom-capture --hid-record --products=0317,0084 > /tmp/wacom-input.txt
+python3 tools/capture/check_capture_wizard.py
+tools/capture/build/waccom-capture --hid-inventory
+tools/capture/build/waccom-capture --hid-record --products=0317,0084 > /tmp/wacom-input.txt
 ```
 
 The check uses a clearly simulated recorder and does not access hardware. The direct raw command stops on Ctrl-C; use the wizard for guided, confirmed steps.

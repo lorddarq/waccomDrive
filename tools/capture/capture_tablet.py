@@ -43,7 +43,9 @@ def number(prompt, maximum):
 
 
 def inventory(recorder):
-    result = subprocess.run([str(recorder), '--hid-inventory'], capture_output=True, text=True, check=True)
+    result = subprocess.run([str(recorder), '--hid-inventory'], capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or f'Recorder failed with exit code {result.returncode}.')
     return json.loads(result.stdout)
 
 
@@ -54,7 +56,7 @@ def select_products(devices):
         if isinstance(pid, int):
             products.setdefault(pid, []).append(device)
     if not products:
-        raise RuntimeError('No Wacom HID interfaces found. Connect/pair the tablet and retry. Input Monitoring may be required.')
+        raise RuntimeError('No tablet detected. Please connect your Wacom Tablet and restart the app')
     ids = sorted(products)
     for index, pid in enumerate(ids, 1):
         entries = products[pid]
@@ -282,12 +284,12 @@ def run_step(step, recorder, output, session):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--recorder', type=Path, default=Path(__file__).resolve().parent.parent / 'build/waccom-capture')
+    parser.add_argument('--recorder', type=Path, default=Path(__file__).resolve().parent / 'build/waccom-capture')
     parser.add_argument('--output', type=Path, help='New session directory; existing directories are never overwritten.')
     args = parser.parse_args()
     recorder = args.recorder.resolve()
     if not recorder.is_file():
-        parser.error('Recorder missing. Run script/capture_tablet.command to build it.')
+        parser.error('Recorder missing. Run tools/capture/capture_tablet.command to build it.')
     print('Guided Wacom capture — read-only HID monitoring, no synthetic pen/mouse events.')
     print('Quit WaccomDrive and other tablet drivers before capture. Leave the tablet connected.')
     print('Allow Input Monitoring for the terminal/capture tool if requested; Accessibility is not needed.')
@@ -303,7 +305,7 @@ def main():
               'pen_buttons': number('Number of pen side buttons to test (0–8): ', 8)}
     wireless = choice('Wireless hardware: b native Bluetooth | r USB receiver | n none | u unknown: ', ['b', 'r', 'n', 'u'])
     identifier = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
-    output = (args.output or Path(__file__).resolve().parent.parent / 'captures' / ('session-' + identifier)).resolve()
+    output = (args.output or Path(__file__).resolve().parent / 'captures' / ('session-' + identifier)).resolve()
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / 'device.json', {'schema_version': 1, 'inventory': initial, 'selected_products': products,
                                       'advertised_capabilities': advertised(selected),
@@ -350,5 +352,5 @@ if __name__ == '__main__':
         print('\nSetup cancelled; no recording started.', file=sys.stderr)
         sys.exit(130)
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-        print('Capture setup failed: ' + str(error), file=sys.stderr)
+        print(str(error), file=sys.stderr)
         sys.exit(1)

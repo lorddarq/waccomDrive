@@ -113,3 +113,21 @@ while True: time.sleep(.01)
     assert len([s for s in plan if s['id'].startswith('dial-')]) == 24
     assert any(s['id'] == 'key-32' for s in plan) and any(s['id'] == 'pen-button-08' for s in plan)
 print('Guided capture checks passed: explicit confirmation, repeat retention, absent/skip gates, failed-capture rejection, Ctrl-C preservation, raw validation, unknown capabilities, and multi-control plans. No hardware accessed.')
+
+# Empty inventories and native discovery failures retain their actionable messages.
+message = 'No tablet detected. Please connect your Wacom Tablet and restart the app'
+try:
+    wizard.select_products([])
+    raise AssertionError('Accepted an empty inventory')
+except RuntimeError as error:
+    assert str(error) == message
+with tempfile.TemporaryDirectory(prefix='wacom-no-tablet-') as directory:
+    recorder = Path(directory) / 'recorder'
+    recorder.write_text('#!' + sys.executable + '\nimport sys\nprint(' + repr(message) + ', file=sys.stderr)\nsys.exit(1)\n')
+    recorder.chmod(0o755)
+    try:
+        wizard.inventory(recorder)
+        raise AssertionError('Ignored failed inventory')
+    except RuntimeError as error:
+        assert str(error) == message
+print('No-tablet guidance and discovery error propagation passed.')

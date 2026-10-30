@@ -10,9 +10,11 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 root = Path(__file__).resolve().parents[1]
-if len(sys.argv) != 2:
-    raise SystemExit('usage: python3 script/check_package.py path/to/installer.pkg')
+if len(sys.argv) not in (2, 3):
+    raise SystemExit('usage: python3 script/check_package.py path/to/installer.pkg [--local|--signed-app|--release]')
 package = Path(sys.argv[1]).resolve()
+mode = sys.argv[2] if len(sys.argv) == 3 else None
+assert mode in (None, '--local', '--signed-app', '--release'), 'Unknown build type'
 with tempfile.TemporaryDirectory(prefix='waccom-package-check-') as temporary:
     temporary = Path(temporary)
     expanded = temporary / 'expanded'
@@ -22,6 +24,21 @@ with tempfile.TemporaryDirectory(prefix='waccom-package-check-') as temporary:
     assert distribution.find('options').get('hostArchitectures') == 'arm64'
     assert distribution.find('domains').get('enable_currentUserHome') == 'false'
     assert distribution.find('.//must-close/app').get('id') == 'local.waccomDrive'
+    welcome = distribution.find('welcome')
+    assert welcome.get('file') == 'Welcome.rtfd' and welcome.get('mime-type') == 'text/rtfd'
+    resources = expanded / 'Resources'
+    document = resources / 'Welcome.rtfd'
+    assert document.is_file(), 'Welcome must be a self-contained RTFD file'
+    assert (resources / distribution.find('readme').get('file')).is_file()
+    sources = ['cover-dev.png' if mode == '--local' else 'cover.png'] if mode else ['cover-dev.png', 'cover.png']
+    matches = False
+    for source in sources:
+        check = subprocess.run(['swift', '-module-cache-path', str(root / 'build/module-cache'),
+                                str(root / 'script/installer_welcome.swift'), str(root / 'previews' / source),
+                                str(document), '--check'], capture_output=True, text=True)
+        matches |= check.returncode == 0
+    assert matches, 'Welcome artwork failed native decoding, crop, size, or build-type validation'
+
     apps = list(expanded.glob('*/Payload/Applications/WaccomDrive.app'))
     assert len(apps) == 1, 'Installer must contain exactly the expected Applications bundle'
     app = apps[0]

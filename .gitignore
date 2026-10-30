@@ -26,3 +26,6 @@ build/
 # Python diagnostic tooling.
 __pycache__/
 *.pyc
+
+# Standalone guided-capture sessions.
+/tools/capture/captures/

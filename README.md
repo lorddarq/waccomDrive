@@ -42,6 +42,7 @@ A native macOS USB driver and settings app for the Wacom Intuos Pro Large PTH-85
 - Build only: `./script/build_and_run.sh --build`.
 - Create an installer: `./script/package.sh --local`.
 - Installer output: `build/installer/`.
+- Welcome artwork: `previews/cover-dev.png` for local builds; `previews/cover.png` for production (`--release` / `--signed-app`).
 - Uninstall from Settings or use the companion `Uninstall WaccomDrive.command`.
 - GitHub Actions are excluded; builds run locally.
 
@@ -72,10 +73,10 @@ WACCOM_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./script/bui
 
 ## Guided captures for other tablets
 
-- Run `./script/capture_tablet.command` to build and start the capture guide.
+- Run `./tools/capture/capture_tablet.command` to build and start the capture guide.
 - Each step requires explicit confirmation; repeats, skips, unavailable features, and partial sessions are preserved.
-- Saves raw reports, device identity/descriptors, capability evidence, and notes under `captures/`. This does not add driver support automatically.
-- See [capture instructions and limitations](docs/guided-capture.md).
+- Saves raw reports, device identity/descriptors, capability evidence, and notes under `tools/capture/captures/`. This does not add driver support automatically.
+- See [capture instructions and limitations](tools/capture/README.md).
 
 ## Tablet artwork
 

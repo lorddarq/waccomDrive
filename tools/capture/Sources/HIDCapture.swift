@@ -1,9 +1,8 @@
-#if !APP
 import Foundation
 import IOKit.hid
 
 // Passive diagnostics only: no event posting, exclusive opens, or device writes.
-// All callbacks and output run on the main run loop, like TabletSession.
+// All callbacks and output run on the main run loop.
 final class HIDCapture {
     private let manager = IOHIDManagerCreate(kCFAllocatorDefault, 0)
     private var seen: Set<String> = []
@@ -11,21 +10,22 @@ final class HIDCapture {
     private var failed = false
 
     static func run(_ arguments: [String]) throws {
+        let arguments = arguments.isEmpty ? ["--hid-inventory"] : arguments
         let recording = arguments.first == "--hid-record"
         var products: [Int] = []
         if recording {
             guard arguments.count == 2, arguments[1].hasPrefix("--products=") else {
-                throw SettingsError.invalid("Usage: --hid-record --products=0317,0084 (hex product IDs)")
+                throw CaptureError.invalid("Usage: --hid-record --products=0317,0084 (hex product IDs)")
             }
             let fields = arguments[1].dropFirst("--products=".count).split(separator: ",", omittingEmptySubsequences: false)
             for field in fields {
                 guard let id = Int(field, radix: 16), (1...65535).contains(id) else {
-                    throw SettingsError.invalid("Invalid Wacom product ID: \(field)")
+                    throw CaptureError.invalid("Invalid Wacom product ID: \(field)")
                 }
                 products.append(id)
             }
         } else if arguments != ["--hid-inventory"] {
-            throw SettingsError.invalid("Usage: --hid-inventory")
+            throw CaptureError.invalid("Usage: --hid-inventory")
         }
         let capture = HIDCapture()
         let matches: [[String: Any]] = products.isEmpty ? [[kIOHIDVendorIDKey: 0x056A]] : products.map {
@@ -68,10 +68,13 @@ final class HIDCapture {
         }
         let result = IOHIDManagerOpen(capture.manager, 0)
         guard result == kIOReturnSuccess else {
-            throw SettingsError.invalid("HID access failed (\(result)). Allow Input Monitoring for the terminal/capture tool, quit other tablet drivers, and retry. No capture was started.")
+            throw CaptureError.invalid("HID access failed (\(result)). Allow Input Monitoring for the terminal/capture tool, quit other tablet drivers, and retry. No capture was started.")
         }
         let devices = (IOHIDManagerCopyDevices(capture.manager) as? Set<IOHIDDevice>) ?? []
         if !recording {
+            guard !devices.isEmpty else {
+                throw CaptureError.invalid("No tablet detected. Please connect your Wacom Tablet and restart the app")
+            }
             let inventory: [String: Any] = ["schema_version": 1, "os": ProcessInfo.processInfo.operatingSystemVersionString,
                                           "interfaces": devices.map(Self.metadata).sorted { ($0["interface"] as? String ?? "") < ($1["interface"] as? String ?? "") }]
             let data = try JSONSerialization.data(withJSONObject: inventory, options: [.prettyPrinted, .sortedKeys])
@@ -101,10 +104,10 @@ final class HIDCapture {
             return source
         }
         capture.emit(["event": "session_start", "schema_version": 1, "products": products, "interfaces": capture.seen.count])
-        guard !capture.failed else { throw SettingsError.invalid("Could not write capture header.") }
+        guard !capture.failed else { throw CaptureError.invalid("Could not write capture header.") }
         withExtendedLifetime((capture, signals)) { CFRunLoopRun() }
         capture.emit(["event": "session_end"])
-        if capture.failed { throw SettingsError.invalid("Could not write capture output; recording stopped.") }
+        if capture.failed { throw CaptureError.invalid("Could not write capture output; recording stopped.") }
     }
 
     private static func identifier(_ device: IOHIDDevice) -> String {
@@ -161,4 +164,3 @@ final class HIDCapture {
         }
     }
 }
-#endif
