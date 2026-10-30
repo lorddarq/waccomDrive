@@ -3,6 +3,32 @@ import Foundation
 import CoreGraphics
 
 func checkSettingsAndButtons() throws {
+    var custom = DriverSettings()
+    custom.penButtons = [.customKey, .customKey]
+    custom.tabletButtons[1] = .customKey
+    let eyedropper = CustomKeyShortcut(keyCode: 34, modifiers: 0, label: "I")
+    custom[shortcut: "pen.0"] = eyedropper
+    custom[shortcut: "pen.1"] = CustomKeyShortcut(keyCode: 11, modifiers: CGEventFlags.maskCommand.rawValue, label: "⌘B")
+    custom[shortcut: "tablet.1"] = eyedropper
+    try custom.validate()
+    let roundTrip = try JSONDecoder().decode(DriverSettings.self, from: JSONEncoder().encode(custom))
+    assert(roundTrip == custom)
+    let customMapper = ButtonMapper()
+    customMapper.configure(custom)
+    let keyDown = customMapper.pen(1)
+    assert(keyDown.count == 1 && keyDown[0].type == .keyDown && keyDown[0].getIntegerValueField(.keyboardEventKeycode) == 34)
+    assert(customMapper.pen(1).isEmpty)
+    assert(customMapper.pad(2).isEmpty, "Same shortcut across buttons stays held")
+    assert(customMapper.pen(0).isEmpty)
+    let keyUp = customMapper.pad(0)
+    assert(keyUp.count == 1 && keyUp[0].type == .keyUp)
+    let combination = customMapper.pen(2)
+    assert(combination.count == 1 && combination[0].flags.contains(.maskCommand))
+    assert(customMapper.releaseAll().first?.type == .keyUp)
+    custom[shortcut: "pen.0"] = nil
+    do { try custom.validate(); assertionFailure("Missing custom shortcut accepted") } catch { }
+    custom[shortcut: "pen.0"] = CustomKeyShortcut(keyCode: 200, modifiers: 0, label: "Invalid")
+    do { try custom.validate(); assertionFailure("Invalid key code accepted") } catch { }
     let directory = URL.temporaryDirectory.appendingPathComponent("waccom-check-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = directory.appendingPathComponent("settings.json")

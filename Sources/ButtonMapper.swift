@@ -18,6 +18,7 @@ final class ButtonMapper {
     var posting = false
     var location = CGPoint.zero
     private var active: Set<ButtonAction> = []
+    private var activeShortcuts: Set<CustomKeyShortcut> = []
     private var penBits = 0, padBits = 0
     private var ringPosition: Int?
     private var ringRemainder = 0
@@ -60,8 +61,13 @@ final class ButtonMapper {
 
     private func update() -> [CGEvent] {
         var next = Set<ButtonAction>()
-        for (bits, actions) in [(penBits, settings.penButtons), (padBits, settings.tabletButtons)] {
-            for (index, action) in actions.enumerated() where bits & (1 << index) != 0 && action != .none { next.insert(action) }
+        var nextShortcuts = Set<CustomKeyShortcut>()
+        for (prefix, bits, actions) in [("pen", penBits, settings.penButtons), ("tablet", padBits, settings.tabletButtons)] {
+            for (index, action) in actions.enumerated() where bits & (1 << index) != 0 && action != .none {
+                if action == .customKey {
+                    if let shortcut = settings[shortcut: "\(prefix).\(index)"] { nextShortcuts.insert(shortcut) }
+                } else { next.insert(action) }
+            }
         }
         let released = active.subtracting(next), pressed = next.subtracting(active)
         active = next
@@ -71,6 +77,15 @@ final class ButtonMapper {
                 events += makeEvents(action, down: down)
             }
         }
+        for (shortcuts, down) in [(activeShortcuts.subtracting(nextShortcuts), false), (nextShortcuts.subtracting(activeShortcuts), true)] {
+            for shortcut in shortcuts.sorted(by: { ($0.keyCode, $0.modifiers) < ($1.keyCode, $1.modifiers) }) {
+                if let event = CGEvent(keyboardEventSource: nil, virtualKey: shortcut.keyCode, keyDown: down) {
+                    event.flags = flags.union(CGEventFlags(rawValue: shortcut.modifiers))
+                    events.append(event)
+                }
+            }
+        }
+        activeShortcuts = nextShortcuts
         if posting { events.forEach { $0.post(tap: .cghidEventTap) } }
         return events
     }

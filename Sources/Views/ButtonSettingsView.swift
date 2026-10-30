@@ -6,8 +6,10 @@ struct ActionPicker: View {
     let pressed: Bool
     var profilesAvailable = false
     @Binding var action: ButtonAction
+    @Binding var shortcut: CustomKeyShortcut?
     var body: some View {
-        HStack {
+        VStack(alignment: .trailing, spacing: 6) {
+          HStack {
             Circle().fill(pressed ? Color.green : (action == .none ? Color.secondary.opacity(0.25) : Color.accentColor)).frame(width: 8, height: 8)
                 .accessibilityLabel(pressed ? "Pressed" : "Released")
             Picker(title, selection: $action) {
@@ -15,6 +17,10 @@ struct ActionPicker: View {
                     Text(item.title).tag(item).disabled(item == .cyclePressureProfile && !profilesAvailable)
                 }
             }
+          }
+          if action == .customKey {
+              ShortcutRecorder(shortcut: $shortcut).frame(width: 200, height: 24)
+          }
         }
     }
 }
@@ -87,9 +93,9 @@ struct PenSettingsView: View {
             }
             Section("Pen buttons") {
                 ForEach(0..<2, id: \.self) { index in
-                    ActionPicker(title: "Pen button \(index + 1)", pressed: model.pen.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.penButtons[index])
+                    ActionPicker(title: "Pen button \(index + 1)", pressed: model.pen.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.penButtons[index], shortcut: $model.draft[shortcut: "pen.\(index)"])
                 }
-                Text("Press a side button to identify it by the live indicator. Hold actions stay down until the button is released; shortcuts run once per press.")
+                Text("Press a side button to identify it by the live indicator. Hold actions and custom keys stay down until the button is released; preset shortcuts run once per press.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped)
@@ -152,7 +158,7 @@ struct TabletButtonsView: View {
         hoveredKey = inside ? index : (hoveredKey == index ? nil : hoveredKey)
     }
     private func mappingRow(index: Int, title: String) -> some View {
-        ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.tabletButtons[index])
+        ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.tabletButtons[index], shortcut: $model.draft[shortcut: "tablet.\(index)"])
             .onChange(of: model.draft.tabletButtons[index]) { _, _ in selectedKey = index }
             .contentShape(Rectangle())
             .onHover { updateHover(index, $0) }

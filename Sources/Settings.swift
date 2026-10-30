@@ -3,10 +3,11 @@ import CoreGraphics
 import ColorSync
 
 enum ButtonAction: String, Codable, CaseIterable, Identifiable {
-    case none, rightClick, middleClick, undo, redo, brush, eraser, brushSmaller, brushLarger, space, shift, option, command, control, toggleTouch, cyclePressureProfile
+    case none, rightClick, middleClick, undo, redo, brush, eraser, brushSmaller, brushLarger, space, shift, option, command, control, toggleTouch, cyclePressureProfile, customKey
     var id: String { rawValue }
     var title: String {
         switch self {
+        case .customKey: "Custom shortcut…"
         case .none: "No action"
         case .rightClick: "Right click"
         case .middleClick: "Middle click"
@@ -25,6 +26,15 @@ enum ButtonAction: String, Codable, CaseIterable, Identifiable {
         case .cyclePressureProfile: "Cycle pressure profiles"
         }
     }
+}
+
+struct CustomKeyShortcut: Codable, Hashable {
+    var keyCode: UInt16
+    var modifiers: UInt64
+    var label: String
+    static let allowedModifiers = CGEventFlags([.maskCommand, .maskShift, .maskAlternate, .maskControl]).rawValue
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers }
+    func hash(into hasher: inout Hasher) { hasher.combine(keyCode); hasher.combine(modifiers) }
 }
 
 struct TouchSettings: Codable, Equatable {
@@ -51,6 +61,15 @@ struct DriverSettings: Codable, Equatable {
     var pressureProfileID: UUID?
     // Profile payload is used in backups/imports; live profiles have individual JSON files.
     var pressureProfiles: [PressureProfile]?
+    var customShortcuts: [String: CustomKeyShortcut]?
+    subscript(shortcut key: String) -> CustomKeyShortcut? {
+        get { customShortcuts?[key] }
+        set {
+            var shortcuts = customShortcuts ?? [:]
+            shortcuts[key] = newValue
+            customShortcuts = shortcuts.isEmpty ? nil : shortcuts
+        }
+    }
     var penButtons: [ButtonAction] = [.none, .none]
     // Index 0: ring center switch; 1...8: ExpressKeys.
     var tabletButtons = Array(repeating: ButtonAction.none, count: 9)
@@ -82,6 +101,22 @@ struct DriverSettings: Codable, Equatable {
         guard version == 1 else { throw SettingsError.invalid("This settings version is not supported.") }
         guard penButtons.count == 2, tabletButtons.count == 9 else {
             throw SettingsError.invalid("Expected two pen buttons and nine tablet buttons.")
+        }
+        let bindings = [("pen", penButtons), ("tablet", tabletButtons)]
+        let validKeys = Set(bindings.flatMap { prefix, actions in actions.indices.map { "\(prefix).\($0)" } })
+        for (key, shortcut) in customShortcuts ?? [:] {
+            guard validKeys.contains(key), shortcut.keyCode <= 126,
+                  shortcut.modifiers & ~CustomKeyShortcut.allowedModifiers == 0,
+                  !shortcut.label.isEmpty, shortcut.label.count <= 80 else {
+                throw SettingsError.invalid("Invalid custom keyboard shortcut.")
+            }
+        }
+        for (prefix, actions) in bindings {
+            for (index, action) in actions.enumerated() where action == .customKey {
+                guard self[shortcut: "\(prefix).\(index)"] != nil else {
+                    throw SettingsError.invalid("Record a shortcut for each custom button before saving.")
+                }
+            }
         }
         guard touchSettings.pointerSpeed.isFinite, (0.25...4).contains(touchSettings.pointerSpeed) else {
             throw SettingsError.invalid("Touch pointer speed is outside its allowed range.")

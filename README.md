@@ -10,6 +10,7 @@ A native macOS USB driver and settings app for the Wacom Intuos Pro Large PTH-85
 - Display mapping, tablet active area, rotation, and optional aspect-ratio preservation.
 - Pressure sensitivity and tip activation controls, with named local JSON profiles and button-driven cycling.
 - Eight ExpressKeys and ring-center button mapping with a visual tablet diagram, including Touch on/off.
+- Custom keyboard shortcuts for pen buttons, ExpressKeys, and the ring center. Choose Custom shortcut, record a key (for example I for eyedropper) with optional modifiers, then Save & Apply. Escape cancels recording; custom keys stay held until the tablet button is released.
 - Touch-ring brush-size control with direction and response settings.
 - Surface touch on/off, one-finger pointer/tap, and two-finger scrolling.
 - Pen-range palm rejection while the driver is active.
