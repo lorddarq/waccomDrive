@@ -84,10 +84,8 @@ struct ContentView: View {
                     TabletAsset(name: "base").frame(width: 238, height: 254)
                     GroupBox {
                         VStack(spacing: 12) {
-                            if let tablet = model.tabletHardware {
-                                statusRow("Model", tablet.name)
-                                if let serial = tablet.serial { statusRow("Serial No", serial) }
-                            }
+                            statusRow("Model", model.tabletHardware?.name ?? "Not detected")
+                            statusRow("Serial No", model.tabletHardware?.serial ?? "Not reported")
                             statusRow("Driver version", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
                             statusRow("Tablet", model.tabletStatus)
                             if let issue = model.usbIssue {
