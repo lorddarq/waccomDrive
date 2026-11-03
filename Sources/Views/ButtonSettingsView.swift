@@ -51,19 +51,35 @@ struct PenSettingsView: View {
                     Button("Show JSON files") { model.showPressureProfiles() }.disabled(model.pressureProfiles.isEmpty)
                 }
                 if let profile = model.selectedPressureProfile,
-                   profile.sensitivity != model.draft.sensitivity || profile.contactThreshold != model.draft.contactThreshold {
+                   profile.sensitivity != model.draft.sensitivity || profile.contactThreshold != model.draft.contactThreshold || profile.pressureCurve != model.draft.pressureCurve || profile.pressureSmoothing != model.draft.pressureSmoothing {
                     Text("Modified profile. Update profile to replace its saved values.").font(.caption).foregroundStyle(.secondary)
                 }
-                Text("Profiles store sensitivity and tip activation locally. Select a profile, then Save & Apply. Button cycling uses the displayed order.")
+                Text("Profiles store the pressure curve, smoothing, and tip activation locally. Select a profile, then Save & Apply. Button cycling uses the displayed order.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Pressure sensitivity") {
+                Toggle("Custom pressure curve", isOn: Binding(get: { model.draft.pressureCurve != nil }, set: { enabled in
+                    if enabled {
+                        model.draft.pressureCurve = PressureCurve(light: model.draft.pressure(512), medium: model.draft.pressure(1024), firm: model.draft.pressure(1535))
+                    } else { model.draft.pressureCurve = nil }
+                }))
+                if model.draft.pressureCurve == nil {
                 HStack {
                     Text("Firm")
                     Slider(value: $model.draft.sensitivity, in: 0...1).accessibilityLabel("Pressure sensitivity")
                     Text("Soft")
                 }
                 Text("Softer response reaches higher brush pressure with less pen force. The middle position is linear.")
+                    .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    curveControl("Light input (25%)", keyPath: \.light, lower: 0, upper: model.draft.pressureCurve?.medium ?? 1)
+                    curveControl("Medium input (50%)", keyPath: \.medium, lower: model.draft.pressureCurve?.light ?? 0, upper: model.draft.pressureCurve?.firm ?? 1)
+                    curveControl("Firm input (75%)", keyPath: \.firm, lower: model.draft.pressureCurve?.medium ?? 0, upper: 1)
+                    Button("Reset to linear") { model.draft.pressureCurve = PressureCurve() }
+                    Text("Set the output pressure at each input level. Values between points are interpolated. Higher output needs less pen force.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Text("2,048 native pressure levels · continuous output. Software cannot add sensor levels.")
                     .font(.caption).foregroundStyle(.secondary)
                 Canvas { context, size in
                     let rect = CGRect(origin: .zero, size: size)
@@ -81,6 +97,13 @@ struct PenSettingsView: View {
                     ProgressView(value: model.draft.pressure(model.pen.pressure))
                     Text(model.draft.pressure(model.pen.pressure), format: .percent.precision(.fractionLength(0))).monospacedDigit().frame(width: 45)
                 }
+                HStack {
+                    Text("Pressure smoothing")
+                    Slider(value: $model.draft.smoothingMilliseconds, in: 0...50).accessibilityLabel("Pressure smoothing milliseconds")
+                    Stepper("\(Int(model.draft.smoothingMilliseconds)) ms", value: $model.draft.smoothingMilliseconds, in: 0...50, step: 1).fixedSize()
+                }
+                Text("Softens changes between pressure reports. Higher values add response delay; 0 ms disables smoothing. Pen lift resets pressure immediately.")
+                    .font(.caption).foregroundStyle(.secondary)
                 LabeledContent("Live tilt", value: "X \(model.pen.tiltX) · Y \(model.pen.tiltY)")
                 HStack {
                     Text("Tip activation")
@@ -99,6 +122,23 @@ struct PenSettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped)
+    }
+    private func curveControl(_ title: String, keyPath: WritableKeyPath<PressureCurve, Double>, lower: Double, upper: Double) -> some View {
+        let value = Binding<Double>(get: { (model.draft.pressureCurve ?? PressureCurve())[keyPath: keyPath] * 100 }, set: { number in
+            var curve = model.draft.pressureCurve ?? PressureCurve()
+            curve[keyPath: keyPath] = min(upper, max(lower, number / 100))
+            model.draft.pressureCurve = curve
+        })
+        return HStack {
+            Text(title).frame(width: 145, alignment: .leading).fixedSize(horizontal: true, vertical: false)
+            Slider(value: value, in: 0...100).labelsHidden()
+                .frame(maxWidth: .infinity).accessibilityLabel(title)
+            TextField("Output %", value: value, format: .number.precision(.fractionLength(1)))
+                .labelsHidden().textFieldStyle(.roundedBorder)
+                .frame(width: 60).multilineTextAlignment(.trailing).accessibilityLabel("\(title) output percent")
+            Text("%").foregroundStyle(.secondary)
+            Stepper("Adjust \(title)", value: value, in: 0...100, step: 0.1).labelsHidden().fixedSize().accessibilityLabel("Adjust \(title)")
+        }
     }
 }
 

@@ -56,8 +56,12 @@ final class TabletSession {
         output.settings = settings
         output.contactThreshold = settings.contactThreshold
         touch.configure(settings.touchSettings)
-        touch.bounds = settings.displayBounds
+        touch.bounds = output.displayBounds
         publishTouch()
+    }
+    func refreshDisplayBounds() {
+        output.refreshDisplayBounds()
+        touch.bounds = output.displayBounds
     }
     func applyPressureProfile(_ profile: PressureProfile) {
         // Preserve held buttons and proximity while changing only pressure response.
@@ -144,7 +148,7 @@ final class TabletSession {
                 }
             } else if session.devices.contains(key) { session.report(bytes, id: id) }
         }, context)
-        IOHIDManagerScheduleWithRunLoop(manager, loop, CFRunLoopMode.defaultMode.rawValue)
+        IOHIDManagerScheduleWithRunLoop(manager, loop, CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, 0)
         guard result == kIOReturnSuccess else {
             stop()
@@ -186,7 +190,7 @@ final class TabletSession {
         }
         if let manager {
             IOHIDManagerClose(manager, 0)
-            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         }
         manager = nil
         powerStatus = nil; onPower?(nil)
@@ -293,7 +297,7 @@ final class TabletSession {
             touch.updatePen(inRange: sample.inRange)
             publishTouch()
             if sample.inProximity {
-                buttons.location = output.settings.location(x: sample.x, y: sample.y, bounds: output.settings.displayBounds)
+                buttons.location = output.mappedLocation(for: sample)
             }
             _ = buttons.pen(sample.inProximity ? sample.buttons : 0)
             output.flags = buttons.flags

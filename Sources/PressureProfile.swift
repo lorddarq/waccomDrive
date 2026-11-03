@@ -6,15 +6,23 @@ struct PressureProfile: Codable, Equatable, Identifiable {
     var name: String
     var sensitivity: Double
     var contactThreshold: Int
+    var pressureCurve: PressureCurve?
+    var pressureSmoothing: Double?
 
     func validate() throws {
         guard version == 1, (1...80).contains(name.trimmingCharacters(in: .whitespacesAndNewlines).count) else {
             throw SettingsError.invalid("Pressure profile names must contain 1–80 characters and use format version 1.")
         }
         try DriverSettings.validatePressure(sensitivity: sensitivity, contactThreshold: contactThreshold)
+        try pressureCurve?.validate()
+        if let pressureSmoothing, !pressureSmoothing.isFinite || !(0...50).contains(pressureSmoothing) {
+            throw SettingsError.invalid("Pressure smoothing must be between 0 and 50 ms.")
+        }
     }
     func apply(to settings: inout DriverSettings) {
         settings.sensitivity = sensitivity
+        settings.pressureCurve = pressureCurve
+        settings.pressureSmoothing = pressureSmoothing
         settings.contactThreshold = contactThreshold
         settings.pressureProfileID = id
     }

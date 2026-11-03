@@ -169,6 +169,7 @@ final class AppModel: NSObject, ObservableObject {
 
     func refreshScreens() {
         session.reset()
+        session.refreshDisplayBounds()
         screens = NSScreen.screens.compactMap { screen in
             guard let id = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? UInt32,
                   let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue(),
@@ -222,7 +223,7 @@ final class AppModel: NSObject, ObservableObject {
         let current = selectedPressureProfile
         let title = (updating ? current?.name ?? name : name).trimmingCharacters(in: .whitespacesAndNewlines)
         let profile = PressureProfile(id: updating ? current?.id ?? UUID() : UUID(), name: title,
-                                      sensitivity: draft.sensitivity, contactThreshold: draft.contactThreshold)
+                                      sensitivity: draft.sensitivity, contactThreshold: draft.contactThreshold, pressureCurve: draft.pressureCurve, pressureSmoothing: draft.pressureSmoothing)
         do {
             guard !pressureProfiles.contains(where: { $0.id != profile.id && $0.name.caseInsensitiveCompare(title) == .orderedSame }) else {
                 throw SettingsError.invalid("A pressure profile with this name already exists.")

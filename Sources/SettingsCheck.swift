@@ -29,6 +29,65 @@ func checkSettingsAndButtons() throws {
     do { try custom.validate(); assertionFailure("Missing custom shortcut accepted") } catch { }
     custom[shortcut: "pen.0"] = CustomKeyShortcut(keyCode: 200, modifiers: 0, label: "Invalid")
     do { try custom.validate(); assertionFailure("Invalid key code accepted") } catch { }
+    var curved = DriverSettings()
+    curved.pressureCurve = PressureCurve(light: 0.1, medium: 0.7, firm: 0.9)
+    try curved.validate()
+    assert(abs(curved.pressure(1024) - 0.7) < 0.001)
+    assert(curved.pressure(-1) == 0 && curved.pressure(4095) == 1)
+    for raw in 1...2047 { assert(curved.pressure(raw) >= curved.pressure(raw - 1)) }
+    let curveData = try JSONEncoder().encode(curved)
+    let curveRestored = try JSONDecoder().decode(DriverSettings.self, from: curveData)
+    assert(curveRestored == curved)
+    let curveProfile = PressureProfile(name: "Detailed", sensitivity: 0.5, contactThreshold: 10, pressureCurve: curved.pressureCurve)
+    let restoredCurveProfile = try JSONDecoder().decode(PressureProfile.self, from: JSONEncoder().encode(curveProfile))
+    var appliedCurve = DriverSettings()
+    restoredCurveProfile.apply(to: &appliedCurve)
+    assert(appliedCurve.pressureCurve == curved.pressureCurve)
+    PressureProfile(name: "Legacy", sensitivity: 0.5, contactThreshold: 10).apply(to: &appliedCurve)
+    assert(appliedCurve.pressureCurve == nil)
+    let legacyProfileData = Data(#"{"name":"Old","version":1,"id":"11111111-1111-1111-1111-111111111111","sensitivity":0.5,"contactThreshold":10}"#.utf8)
+    let legacyCurveProfile = try JSONDecoder().decode(PressureProfile.self, from: legacyProfileData)
+    assert(legacyCurveProfile.pressureCurve == nil)
+    curved.pressureCurve = PressureCurve(light: 0.8, medium: 0.2, firm: 0.9)
+    do { try curved.validate(); assertionFailure("Decreasing pressure curve accepted") } catch { }
+    curved.pressureCurve = PressureCurve(light: .nan)
+    do { try curved.validate(); assertionFailure("Nonfinite pressure curve accepted") } catch { }
+    let smoothOutput = PenOutput()
+    smoothOutput.settings.smoothingMilliseconds = 12
+    var smoothSample = PenSample(pressure: 256, inProximity: true, toolID: 1)
+    func outputPressure(_ events: [CGEvent]) -> Double { events.last!.getDoubleValueField(.tabletEventPointPressure) }
+    let initialPressure = outputPressure(smoothOutput.events(for: smoothSample, time: 1))
+    smoothSample.pressure = 1536
+    let softened = outputPressure(smoothOutput.events(for: smoothSample, time: 1.005))
+    assert(softened > initialPressure && softened < smoothOutput.settings.pressure(1536))
+    let converging = outputPressure(smoothOutput.events(for: smoothSample, time: 1.010))
+    assert(converging > softened)
+    smoothSample.pressure = 0
+    let lifted = smoothOutput.events(for: smoothSample, time: 1.011)
+    assert(lifted.allSatisfy { $0.getDoubleValueField(.tabletEventPointPressure) == 0 })
+    smoothSample.pressure = 256
+    assert(abs(outputPressure(smoothOutput.events(for: smoothSample, time: 1.015)) - initialPressure) < 0.000001)
+    smoothOutput.settings.smoothingMilliseconds = 0
+    smoothSample.pressure = 1536
+    assert(abs(outputPressure(smoothOutput.events(for: smoothSample, time: 1.020)) - smoothOutput.settings.pressure(1536)) < 0.0001)
+    var invalidSmoothing = DriverSettings(); invalidSmoothing.smoothingMilliseconds = .nan
+    do { try invalidSmoothing.validate(); assertionFailure("Nonfinite smoothing accepted") } catch { }
+    // Every constant-pressure circle sample must survive delivery, at full mapped precision.
+    let motionOutput = PenOutput()
+    motionOutput.flags = .maskShift
+    for index in 0..<240 {
+        let angle = Double(index) * 2 * .pi / 240
+        let sample = PenSample(x: 32000 + Int(8000 * cos(angle)), y: 20000 + Int(8000 * sin(angle)), pressure: 1024, inProximity: true, toolID: 1)
+        let events = motionOutput.events(for: sample, time: 2 + Double(index) / 200)
+        let point = events.last!
+        assert(point.type == (index == 0 ? .leftMouseDown : .leftMouseDragged))
+        assert(point.flags.contains([.maskNonCoalesced, .maskShift]))
+        let expected = motionOutput.mappedLocation(for: sample)
+        assert(abs(point.location.x - expected.x) < 0.00001 && abs(point.location.y - expected.y) < 0.00001)
+        assert(point.getIntegerValueField(.tabletEventPointX) == sample.x)
+        assert(point.getIntegerValueField(.tabletEventPointY) == sample.y)
+    }
+    assert(motionOutput.events(for: PenSample(), time: 4).map(\.type) == [.leftMouseUp, .tabletProximity])
     let directory = URL.temporaryDirectory.appendingPathComponent("waccom-check-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = directory.appendingPathComponent("settings.json")

@@ -88,6 +88,7 @@ struct ContentView: View {
                                 statusRow("Model", tablet.name)
                                 if let serial = tablet.serial { statusRow("Serial No", serial) }
                             }
+                            statusRow("Driver version", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Development")
                             statusRow("Tablet", model.tabletStatus)
                             if let issue = model.usbIssue {
                                 Label(issue, systemImage: "hand.raised").font(.callout).foregroundStyle(.orange)

@@ -1,10 +1,18 @@
 import CoreGraphics
+import Foundation
 
 // Experimental user-space tablet delivery. All calls run on the HID run loop.
 final class PenOutput {
     var posting = false
     var contactThreshold = 10
-    var settings = DriverSettings()
+    var settings = DriverSettings() {
+        didSet { refreshDisplayBounds() }
+    }
+    private(set) var displayBounds = DriverSettings().displayBounds
+    func refreshDisplayBounds() { displayBounds = settings.displayBounds }
+    func mappedLocation(for sample: PenSample) -> CGPoint {
+        settings.location(x: sample.x, y: sample.y, bounds: displayBounds)
+    }
     var flags: CGEventFlags = []
     var heldMouse: CGMouseButton?
     private var eventNumber: Int64 = 0
@@ -13,11 +21,25 @@ final class PenOutput {
     private var toolID = 0
     private var location = CGPoint.zero
 
-    func events(for sample: PenSample) -> [CGEvent] {
+    private var filteredPressure = 0.0
+    private var pressureTime: TimeInterval?
+
+    func events(for sample: PenSample, time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> [CGEvent] {
         var events: [CGEvent] = []
         let contact = sample.inProximity && sample.pressure > contactThreshold
+        if contact {
+            let target = settings.pressure(sample.pressure)
+            let tau = settings.smoothingMilliseconds / 1000
+            if down, toolID == sample.toolID, let previous = pressureTime, time > previous, time - previous < 0.1, tau > 0 {
+                filteredPressure += (target - filteredPressure) * (1 - exp(-(time - previous) / tau))
+            } else { filteredPressure = target }
+            pressureTime = time
+        } else {
+            filteredPressure = 0
+            pressureTime = nil
+        }
         if sample.inProximity {
-            location = settings.location(x: sample.x, y: sample.y, bounds: settings.displayBounds)
+            location = mappedLocation(for: sample)
         }
         // Release the old tool before exiting proximity or switching tools.
         if down && (!contact || sample.toolID != toolID) {
@@ -50,7 +72,8 @@ final class PenOutput {
     private func mouse(_ type: CGEventType, sample: PenSample) -> CGEvent? {
         guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: location, mouseButton: type == .rightMouseDragged ? .right : (type == .otherMouseDragged ? .center : .left)) else { return nil }
         if type == .leftMouseDown { eventNumber += 1 }
-        event.flags = event.flags.union(flags)
+        // Preserve individual tablet movement samples through the event pipeline.
+        event.flags = event.flags.union(flags).union(.maskNonCoalesced)
         event.setIntegerValueField(.mouseEventNumber, value: eventNumber)
         event.setIntegerValueField(.mouseEventClickState, value: type == .mouseMoved ? 0 : 1)
         event.setIntegerValueField(.mouseEventSubtype, value: 1) // NSTabletPointEventSubtype
@@ -58,7 +81,7 @@ final class PenOutput {
         event.setIntegerValueField(.tabletEventPointX, value: Int64(sample.x))
         event.setIntegerValueField(.tabletEventPointY, value: Int64(sample.y))
         event.setIntegerValueField(.tabletEventPointButtons, value: type == .leftMouseUp ? 0 : Int64(sample.pressure > contactThreshold ? 1 : 0))
-        let pressure = type == .leftMouseUp ? 0 : settings.pressure(sample.pressure)
+        let pressure = type == .leftMouseUp ? 0 : filteredPressure
         event.setDoubleValueField(.tabletEventPointPressure, value: pressure)
         event.setDoubleValueField(.mouseEventPressure, value: pressure)
         event.setDoubleValueField(.tabletEventTiltX, value: Double(sample.tiltX) / 64)

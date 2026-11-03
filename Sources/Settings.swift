@@ -37,6 +37,26 @@ struct CustomKeyShortcut: Codable, Hashable {
     func hash(into hasher: inout Hasher) { hasher.combine(keyCode); hasher.combine(modifiers) }
 }
 
+struct PressureCurve: Codable, Equatable {
+    // Output pressure at 25%, 50%, and 75% of native input. Endpoints stay 0 and 1.
+    var light = 0.25
+    var medium = 0.5
+    var firm = 0.75
+
+    func validate() throws {
+        guard [light, medium, firm].allSatisfy({ $0.isFinite && (0...1).contains($0) }),
+              light <= medium, medium <= firm else {
+            throw SettingsError.invalid("Pressure curve points must increase from 0% to 100%.")
+        }
+    }
+    func response(_ input: Double) -> Double {
+        let x = min(1, max(0, input)) * 4
+        let index = min(3, Int(x))
+        let points = [0, light, medium, firm, 1]
+        return points[index] + (points[index + 1] - points[index]) * (x - Double(index))
+    }
+}
+
 struct TouchSettings: Codable, Equatable {
     var enabled = false
     var palmRejection = true
@@ -57,6 +77,12 @@ struct DriverSettings: Codable, Equatable {
     var rotate180 = false
     var areaX = 0.0, areaY = 0.0, areaWidth = 1.0, areaHeight = 1.0
     var sensitivity = 0.5
+    var pressureCurve: PressureCurve?
+    var pressureSmoothing: Double?
+    var smoothingMilliseconds: Double {
+        get { pressureSmoothing ?? 12 }
+        set { pressureSmoothing = newValue }
+    }
     var contactThreshold = 10
     var pressureProfileID: UUID?
     // Profile payload is used in backups/imports; live profiles have individual JSON files.
@@ -94,6 +120,10 @@ struct DriverSettings: Codable, Equatable {
     }
     func validate() throws {
         try Self.validatePressure(sensitivity: sensitivity, contactThreshold: contactThreshold)
+        try pressureCurve?.validate()
+        guard smoothingMilliseconds.isFinite, (0...50).contains(smoothingMilliseconds) else {
+            throw SettingsError.invalid("Pressure smoothing must be between 0 and 50 ms.")
+        }
         if let profiles = pressureProfiles {
             guard Set(profiles.map(\.id)).count == profiles.count else { throw SettingsError.invalid("Duplicate pressure profile IDs.") }
             for profile in profiles { try profile.validate() }
@@ -133,7 +163,8 @@ struct DriverSettings: Codable, Equatable {
     }
 
     func pressure(_ raw: Int) -> Double {
-        pow(min(1, max(0, Double(raw) / 2047)), pow(4, 0.5 - sensitivity))
+        let input = min(1, max(0, Double(raw) / 2047))
+        return pressureCurve?.response(input) ?? pow(input, pow(4, 0.5 - sensitivity))
     }
 
     func activeArea(in bounds: CGRect) -> CGRect {

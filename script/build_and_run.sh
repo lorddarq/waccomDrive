@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 MODE="${1:-run}"
-VERSION="${WACCOM_VERSION:-0.1.1}"
+VERSION="${WACCOM_VERSION:-0.1.2}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "WACCOM_VERSION must be X.Y.Z." >&2; exit 2; }
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
