@@ -47,8 +47,15 @@ struct WirelessCheck {
         status[5] = 0x9F
         assert(WirelessStatus.decode(status)?.power?.batteryPercent == 100)
         assert(WirelessStatus.decode(status)?.power?.charging == true)
-        // Unknown paired models must not reach this tablet's pen decoder.
+        // Medium receiver identity selects Medium scaling and proximity identity.
         status[6] = 0x03; status[7] = 0x15
+        session.receiverReport(status, id: 128)
+        assert(session.wirelessStatus?.supported == true && session.output.tablet == .medium)
+        session.receiverReport([2, 0xC2, 0x80, 0x24, 0xB8, 9, 0x5D, 0x31, 0, 0], id: 2)
+        session.receiverReport([2, 0xE1, 0x19, 0x76, 0x38, 0xDC, 0x44, 0x66, 0x52, 0x4D], id: 2)
+        assert(session.decoder.sample.inProximity)
+        // Unknown paired models must not reach this tablet's pen decoder.
+        status[6] = 0x03; status[7] = 0x14
         session.receiverReport(status, id: 128)
         let oldPens = pens
         session.receiverReport([2, 0xC2, 0x80, 0x24, 0xB8, 9, 0x5D, 0x31, 0, 0], id: 2)

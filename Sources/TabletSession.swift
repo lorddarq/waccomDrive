@@ -26,6 +26,7 @@ final class TabletSession {
     private var manager: IOHIDManager?
     private var watchdog: CFRunLoopTimer?
     private var devices: Set<CFHashCode> = []
+    private var directModels: [CFHashCode: SupportedTablet] = [:]
     private var receivers: Set<CFHashCode> = []
     private var receiverPenDevices: Set<CFHashCode> = []
     private var touchDevices: [CFHashCode: IOHIDDevice] = [:]
@@ -91,7 +92,7 @@ final class TabletSession {
     }
     private func publishTouch() { onTouch?(touch.contacts.count, touch.status) }
     private func updateTouchOwnership() {
-        let eligible = touchDevices.filter { !receivers.contains($0.key) || (wirelessStatus?.supported == true && devices.isEmpty) }
+        let eligible = touchDevices.filter { directModels[$0.key] == output.tablet || (receivers.contains($0.key) && wirelessStatus?.supported == true && devices.isEmpty) }
         for (key, device) in touchDevices {
             if output.posting && eligible[key] != nil && !seizedTouch.contains(key) {
                 IOHIDDeviceClose(device, 0)
@@ -113,7 +114,7 @@ final class TabletSession {
         guard let loop = CFRunLoopGetCurrent() else { throw SettingsError.invalid("No current run loop.") }
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, 0)
         self.manager = manager
-        let matches: [[String: Any]] = [0x0317, WacomReceiver.productID].map {
+        let matches: [[String: Any]] = (SupportedTablet.allCases.map(\.rawValue) + [WacomReceiver.productID]).map {
             [kIOHIDVendorIDKey: 0x056A, kIOHIDProductIDKey: $0, kIOHIDTransportKey: "USB"]
         }
         IOHIDManagerSetDeviceMatchingMultiple(manager, matches as CFArray)
@@ -146,7 +147,7 @@ final class TabletSession {
                 if bytes.count == 32 || session.receiverPenDevices.contains(key) || session.touchDevices[key] != nil {
                     session.receiverReport(bytes, id: id)
                 }
-            } else if session.devices.contains(key) { session.report(bytes, id: id) }
+            } else if session.directModels[key] == session.output.tablet { session.report(bytes, id: id) }
         }, context)
         IOHIDManagerScheduleWithRunLoop(manager, loop, CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, 0)
@@ -194,7 +195,7 @@ final class TabletSession {
         }
         manager = nil
         powerStatus = nil; onPower?(nil)
-        devices.removeAll(); receivers.removeAll(); receiverPenDevices.removeAll()
+        devices.removeAll(); directModels.removeAll(); receivers.removeAll(); receiverPenDevices.removeAll()
         wirelessStatus = nil; onWireless?(nil)
         touchDevices.removeAll(); seizedTouch.removeAll()
         touch.controlled = false
@@ -220,7 +221,10 @@ final class TabletSession {
             updateTouchOwnership()
         } else {
             if connected {
+                guard let tablet = SupportedTablet(rawValue: (IOHIDDeviceGetProperty(device, kIOHIDProductIDKey as CFString) as? NSNumber)?.intValue ?? 0) else { return }
+                directModels[id] = tablet
                 devices.insert(id)
+                refreshTabletModel()
                 // Verified surface interface: vendor page FF00, usage 1, 64-byte reports.
                 let page = (IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsagePageKey as CFString) as? NSNumber)?.intValue
                 let usage = (IOHIDDeviceGetProperty(device, kIOHIDPrimaryUsageKey as CFString) as? NSNumber)?.intValue
@@ -228,7 +232,7 @@ final class TabletSession {
                 if page == 0xFF00 && usage == 1 && size == 64 { touchDevices[id] = device; updateTouchOwnership() }
             } else {
                 powerStatus = nil; onPower?(nil)
-                devices.remove(id); touchDevices.removeValue(forKey: id); seizedTouch.remove(id)
+                devices.remove(id); directModels.removeValue(forKey: id); refreshTabletModel(); touchDevices.removeValue(forKey: id); seizedTouch.remove(id)
                 reset(); decoder = PenDecoder(); touchDecoder.reset(); touch.reset()
                 updateTouchOwnership()
                 onPen?(decoder.sample); onPad?(PadSample(buttons: 0, ring: nil))
@@ -237,8 +241,17 @@ final class TabletSession {
         updateTouchOwnership()
         onConnection?(devices.count, !receivers.isEmpty)
     }
+    private func refreshTabletModel() {
+        let tablet = directModels.values.sorted { $0.rawValue < $1.rawValue }.first ??
+            SupportedTablet(rawValue: wirelessStatus?.productID ?? 0) ?? .large
+        if output.tablet != tablet {
+            reset(); decoder = PenDecoder(); touchDecoder.reset()
+            output.tablet = tablet
+        }
+    }
     private func clearWireless() {
         wirelessStatus = nil
+        refreshTabletModel()
         if devices.isEmpty {
             reset(); decoder = PenDecoder(); touchDecoder.reset(); touch.reset()
             powerStatus = nil; onPower?(nil)
@@ -253,6 +266,7 @@ final class TabletSession {
             if status != wirelessStatus {
                 if status.productID != wirelessStatus?.productID { clearWireless() }
                 wirelessStatus = status
+                refreshTabletModel()
                 updateTouchOwnership()
                 onWireless?(status)
             }

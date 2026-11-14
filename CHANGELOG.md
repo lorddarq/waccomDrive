@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.3 — 2026-11-14
+
+- Add the new application icon, including standard and Retina sizes.
+- Add Intuos Pro Medium PTH-651/K (056A:0315) detection, model-specific pen mapping, and receiver model selection.
+- Reduce drawing lag by suspending background pen-preview updates and ignoring unchanged tablet-button reports. Medium USB pen input confirmed working without lag in a short drawing test; longer sessions and a Large-model retest remain pending.
+- Show USB-powered tablets as Plugged in when no battery reading is available, hide the charging-status row, and use a 16 × 16 USB icon. Apply the same power status in the menu bar.
+- Add checks for Medium coordinates, receiver model switching, USB-power display states, and bundled application icons.
+
 ## 0.1.2 — 2026-11-03
 
 - Display the bundled driver version on Overview; keep tablet model and serial-number rows visible when device metadata is unavailable.

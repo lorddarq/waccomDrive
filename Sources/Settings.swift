@@ -167,22 +167,22 @@ struct DriverSettings: Codable, Equatable {
         return pressureCurve?.response(input) ?? pow(input, pow(4, 0.5 - sensitivity))
     }
 
-    func activeArea(in bounds: CGRect) -> CGRect {
+    func activeArea(in bounds: CGRect, tabletSize: CGSize = SupportedTablet.large.penSize) -> CGRect {
         var width = areaWidth, height = areaHeight
         if preserveAspect {
             let ratio = bounds.width / max(1, bounds.height)
-            if width * 65024 / (height * 40640) > ratio { width = height * 40640 * ratio / 65024 }
-            else { height = width * 65024 / ratio / 40640 }
+            if width * tabletSize.width / (height * tabletSize.height) > ratio { width = height * tabletSize.height * ratio / tabletSize.width }
+            else { height = width * tabletSize.width / ratio / tabletSize.height }
         }
         let left = areaX + (areaWidth - width) / 2
         let top = areaY + (areaHeight - height) / 2
         return CGRect(x: left, y: top, width: width, height: height)
     }
 
-    func location(x: Int, y: Int, bounds: CGRect) -> CGPoint {
-        let area = activeArea(in: bounds)
-        var nx = min(1, max(0, (Double(x) / 65024 - area.minX) / area.width))
-        var ny = min(1, max(0, (Double(y) / 40640 - area.minY) / area.height))
+    func location(x: Int, y: Int, bounds: CGRect, tabletSize: CGSize = SupportedTablet.large.penSize) -> CGPoint {
+        let area = activeArea(in: bounds, tabletSize: tabletSize)
+        var nx = min(1, max(0, (Double(x) / tabletSize.width - area.minX) / area.width))
+        var ny = min(1, max(0, (Double(y) / tabletSize.height - area.minY) / area.height))
         if rotate180 { nx = 1 - nx; ny = 1 - ny }
         return CGPoint(x: bounds.minX + nx * max(0, bounds.width - 1), y: bounds.minY + ny * max(0, bounds.height - 1))
     }

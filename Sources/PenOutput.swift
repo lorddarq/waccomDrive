@@ -3,6 +3,7 @@ import Foundation
 
 // Experimental user-space tablet delivery. All calls run on the HID run loop.
 final class PenOutput {
+    var tablet: SupportedTablet = .large
     var posting = false
     var contactThreshold = 10
     var settings = DriverSettings() {
@@ -11,7 +12,7 @@ final class PenOutput {
     private(set) var displayBounds = DriverSettings().displayBounds
     func refreshDisplayBounds() { displayBounds = settings.displayBounds }
     func mappedLocation(for sample: PenSample) -> CGPoint {
-        settings.location(x: sample.x, y: sample.y, bounds: displayBounds)
+        settings.location(x: sample.x, y: sample.y, bounds: displayBounds, tabletSize: tablet.penSize)
     }
     var flags: CGEventFlags = []
     var heldMouse: CGMouseButton?
@@ -94,7 +95,7 @@ final class PenOutput {
         event.type = .tabletProximity
         event.location = location
         for (field, value): (CGEventField, Int64) in [
-            (.tabletProximityEventVendorID, 0x056A), (.tabletProximityEventTabletID, 0x0317),
+            (.tabletProximityEventVendorID, 0x056A), (.tabletProximityEventTabletID, Int64(tablet.rawValue)),
             (.tabletProximityEventDeviceID, 1), (.tabletProximityEventSystemTabletID, 1),
             (.tabletProximityEventCapabilityMask, 0x05C7), // device, XY, buttons, tilt, pressure
             (.tabletProximityEventPointerID, Int64(tool)), (.tabletProximityEventVendorPointerType, Int64(tool)),

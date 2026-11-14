@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 MODE="${1:-run}"
-VERSION="${WACCOM_VERSION:-0.1.2}"
+VERSION="${WACCOM_VERSION:-0.1.3}"
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "WACCOM_VERSION must be X.Y.Z." >&2; exit 2; }
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
@@ -32,6 +32,7 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 <key>CFBundleExecutable</key><string>WaccomDrive</string>
 <key>CFBundleIdentifier</key><string>local.waccomDrive</string>
 <key>CFBundleName</key><string>WaccomDrive</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$VERSION</string>
 <key>CFBundleVersion</key><string>$VERSION</string>
@@ -41,6 +42,15 @@ cat > "$APP_BUNDLE/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 mkdir -p "$APP_BUNDLE/Contents/Resources"
+# Generate the standard macOS icon representations from the source artwork.
+ICONSET="$ROOT_DIR/build/AppIcon.iconset"
+mkdir -p "$ICONSET"
+for SIZE in 16 32 128 256 512; do
+    sips -z "$SIZE" "$SIZE" "$ROOT_DIR/assets/appIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null
+    DOUBLE=$((SIZE * 2))
+    sips -z "$DOUBLE" "$DOUBLE" "$ROOT_DIR/assets/appIcon.png" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
+done
+iconutil -c icns "$ICONSET" -o "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 mkdir -p "$APP_BUNDLE/Contents/Resources/assets"
 cp -R "$ROOT_DIR/assets/tablet" "$ROOT_DIR/assets/connection" "$ROOT_DIR/assets/battery" "$APP_BUNDLE/Contents/Resources/assets/"
 cp "$ROOT_DIR/packaging/Uninstall WaccomDrive.command" "$APP_BUNDLE/Contents/Resources/Uninstall WaccomDrive.command"

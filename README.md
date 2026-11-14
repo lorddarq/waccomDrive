@@ -2,7 +2,7 @@
 
 ![WaccomDrive tablet driver and settings app](previews/cover.png)
 
-A native macOS USB driver and settings app for the Wacom Intuos Pro Large PTH-851/K. No third-party dependencies or kernel extension.
+A native macOS USB driver and settings app for the Wacom Intuos Pro Medium PTH-651/K and Large PTH-851/K. No third-party dependencies or kernel extension.
 
 ## Features
 
@@ -73,8 +73,8 @@ Checklist for the Intuos Pro Large PTH-851/K. Checked items have recorded workin
 - Requires macOS 27 or later; tested on macOS 27.0.1 with Apple silicon.
 - Installer targets arm64; Intel Macs and universal builds are unsupported.
 - Developed with Swift 6.4 and Apple's macOS SDK/tools.
-- Tested device: Intuos Pro Large PTH-851/K, USB ID `056A:0317` (`Intuos5 touch L`). Other models are unverified.
-- Supports the tested PTH-851 over direct USB or Wacom receiver `056A:0084`; other paired models are rejected. Native Bluetooth input is unsupported.
+- Tested devices: Intuos Pro Large PTH-851/K (`056A:0317`) and Medium PTH-651/K (`056A:0315`). macOS may advertise them as Intuos5 touch L/M.
+- Supports PTH-651/K (`056A:0315`) and PTH-851/K (`056A:0317`) over direct USB or Wacom receiver `056A:0084`, using model-specific pen coordinates. Medium USB pen input confirmed in a short drawing test; its other controls and receiver input still need hands-on verification. Other models are rejected. Native Bluetooth input is unsupported.
 - Basic pen input tested in Krita; wireless pen, basic touch, and touch-ring brush-size changes verified. Other apps and advanced mapping still need testing.
 - No pinch, rotation, or full macOS trackpad gestures.
 - Palm rejection requires exclusive touch-interface access and an active driver.

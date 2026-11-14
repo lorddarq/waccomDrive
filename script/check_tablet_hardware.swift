@@ -12,6 +12,12 @@ struct HardwareCheck {
         assert(tablet.name == "Intuos5 touch L" && tablet.serial == "12345")
         assert(!tablet.bluetoothCapable && !tablet.bluetoothConnected, "USB presence does not establish Bluetooth")
         assert(TabletHardware.connectionKind(tablet: tablet, receiverPresent: true) == .receiver)
+        var medium = usb
+        medium["ProductID"] = 0x0315
+        medium["Product"] = "Intuos5 touch M"
+        medium["PrimaryUsagePage"] = 0xFF00
+        assert(TabletHardware.detect(from: [receiver, medium])?.productID == 0x0315)
+        assert(TabletHardware.detect(from: [receiver, medium, usb])?.productID == 0x0315)
         var bt = usb
         bt["Transport"] = "Bluetooth Low Energy"
         let wireless = TabletHardware.detect(from: [bt])!

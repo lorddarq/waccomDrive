@@ -19,6 +19,11 @@ struct TabletPowerStatus: Equatable {
         return TabletPowerStatus(wirelessModuleInstalled: true, batteryPercent: percent, charging: charging)
     }
 
+    // A missing percentage alone does not prove battery absence. USB presence does
+    // establish external power, so avoid showing a speculative discharge state.
+    func showsUSBPower(usbConnected: Bool) -> Bool {
+        usbConnected && batteryPercent == nil && charging != true
+    }
     var batteryIcon: String? {
         guard wirelessModuleInstalled else { return nil }
         if charging == true { return "battery-status-charging" }
@@ -37,6 +42,6 @@ struct TabletPowerStatus: Equatable {
     var chargingDescription: String {
         guard let charging else { return "Unavailable" }
         if charging { return "Charging" }
-        return "Discharging"
+        return batteryPercent == nil ? "Not reported" : "Discharging"
     }
 }

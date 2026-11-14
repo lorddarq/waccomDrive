@@ -1,6 +1,25 @@
 import Foundation
 import IOKit
 
+// Intuos Pro 2013 pen ranges: Linux wacom_wac.c device table (0x315 / 0x317).
+// https://github.com/torvalds/linux/blob/master/drivers/hid/wacom_wac.c
+// Both models use the existing Intuos5-family pen, pad, and touch report layouts.
+enum SupportedTablet: Int, CaseIterable {
+    case medium = 0x0315, large = 0x0317
+    var penSize: CGSize {
+        switch self {
+        case .medium: CGSize(width: 44704, height: 27940)
+        case .large: CGSize(width: 65024, height: 40640)
+        }
+    }
+    var name: String {
+        switch self {
+        case .medium: "Wacom Intuos Pro Medium · PTH-651/K"
+        case .large: "Wacom Intuos Pro Large · PTH-851/K"
+        }
+    }
+}
+
 // USB registry discovery does not open HID interfaces or need Input Monitoring.
 enum WacomReceiver {
     static let productID = 0x0084
@@ -30,11 +49,11 @@ struct TabletHardware: Equatable {
         let tablets = properties.filter {
             ($0["VendorID"] as? NSNumber)?.intValue == 0x056A &&
             ($0["ProductID"] as? NSNumber)?.intValue != WacomReceiver.productID &&
-            (($0["PrimaryUsagePage"] as? NSNumber)?.intValue == 13 || ($0["ProductID"] as? NSNumber)?.intValue == 0x0317)
+            (($0["PrimaryUsagePage"] as? NSNumber)?.intValue == 13 || SupportedTablet(rawValue: ($0["ProductID"] as? NSNumber)?.intValue ?? 0) != nil)
         }
         // Prefer the supported tablet when multiple Wacom devices are attached.
         let ids = Set(tablets.compactMap { ($0["ProductID"] as? NSNumber)?.intValue }).sorted()
-        guard let id = ids.contains(0x0317) ? 0x0317 : ids.first else { return nil }
+        guard let id = ids.first(where: { SupportedTablet(rawValue: $0) != nil }) ?? ids.first else { return nil }
         let interfaces = tablets.filter { ($0["ProductID"] as? NSNumber)?.intValue == id }
         func text(_ key: String) -> String? {
             interfaces.compactMap { ($0[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) }

@@ -6,7 +6,7 @@ struct MappingView: View {
     var body: some View {
         Form {
             Section("Tablet active area") {
-                TabletPreview(settings: model.draft, pen: model.pen).frame(height: 210)
+                TabletPreview(settings: model.draft, pen: model.pen, tabletSize: model.tabletSize).frame(height: 210)
                 areaSlider("Left", key: \.areaX)
                 areaSlider("Top", key: \.areaY)
                 areaSlider("Width", key: \.areaWidth)

@@ -6,7 +6,7 @@ struct WirelessStatus: Equatable {
     let connected: Bool
     let productID: Int
     let power: TabletPowerStatus?
-    var supported: Bool { connected && productID == 0x0317 }
+    var supported: Bool { connected && SupportedTablet(rawValue: productID) != nil }
     static func decode(_ bytes: [UInt8]) -> WirelessStatus? {
         guard bytes.count == 32, bytes[0] == 0x80 else { return nil }
         let connected = bytes[1] & 1 != 0

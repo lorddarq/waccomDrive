@@ -88,6 +88,27 @@ func checkSettingsAndButtons() throws {
         assert(point.getIntegerValueField(.tabletEventPointY) == sample.y)
     }
     assert(motionOutput.events(for: PenSample(), time: 4).map(\.type) == [.leftMouseUp, .tabletProximity])
+    let mediumOutput = PenOutput()
+    mediumOutput.tablet = .medium
+    var mediumSettings = DriverSettings()
+    let testBounds = CGRect(x: -100, y: 50, width: 1001, height: 801)
+    assert(mediumSettings.location(x: 44704, y: 27940, bounds: testBounds, tabletSize: SupportedTablet.medium.penSize) == CGPoint(x: 900, y: 850))
+    assert(mediumSettings.location(x: 22352, y: 13970, bounds: testBounds, tabletSize: SupportedTablet.medium.penSize) == CGPoint(x: 400, y: 450))
+    mediumSettings.rotate180 = true
+    assert(mediumSettings.location(x: 44704, y: 27940, bounds: testBounds, tabletSize: SupportedTablet.medium.penSize) == CGPoint(x: -100, y: 50))
+    mediumSettings.preserveAspect = true
+    let mediumArea = mediumSettings.activeArea(in: testBounds, tabletSize: SupportedTablet.medium.penSize)
+    assert(abs(mediumArea.width * 44704 / (mediumArea.height * 27940) - testBounds.width / testBounds.height) < 0.000001)
+    let mediumEvents = mediumOutput.events(for: PenSample(x: 44704, y: 27940, pressure: 1024, inProximity: true, toolID: 1))
+    assert(mediumEvents.first?.getIntegerValueField(.tabletProximityEventTabletID) == 0x0315)
+    assert(mediumEvents.last?.location == mediumOutput.mappedLocation(for: PenSample(x: 44704, y: 27940)))
+    let noBatteryReading = TabletPowerStatus.fromBatteryByte(0, moduleInstalled: true)
+    assert(noBatteryReading.showsUSBPower(usbConnected: true))
+    assert(!noBatteryReading.showsUSBPower(usbConnected: false))
+    assert(noBatteryReading.chargingDescription == "Not reported")
+    assert(TabletPowerStatus.fromBatteryByte(0, moduleInstalled: false).showsUSBPower(usbConnected: true))
+    assert(!TabletPowerStatus.fromBatteryByte(0x80, moduleInstalled: true).showsUSBPower(usbConnected: true), "A charging battery at 0% must still show charging")
+    assert(!TabletPowerStatus.fromBatteryByte(29, moduleInstalled: true).showsUSBPower(usbConnected: true), "Known battery state must remain visible")
     let directory = URL.temporaryDirectory.appendingPathComponent("waccom-check-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: directory) }
     let url = directory.appendingPathComponent("settings.json")

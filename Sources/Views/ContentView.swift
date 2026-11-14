@@ -120,19 +120,23 @@ struct ContentView: View {
                     }
                 }
                 HStack(alignment: .top, spacing: 16) {
-                    if let power = model.power, power.wirelessModuleInstalled {
+                    if let power = model.powerForDisplay, power.wirelessModuleInstalled || model.usbInterfaces > 0 {
+                        let pluggedIn = power.showsUSBPower(usbConnected: model.usbInterfaces > 0)
                         GroupBox("Battery and charging") {
                             VStack(spacing: 12) {
                                 HStack {
-                                    Text("Battery charge")
+                                    Text(pluggedIn ? "Power source" : "Battery charge")
                                     Spacer()
-                                    if let name = power.batteryIcon, let image = TabletArtwork.batteryImage(name) {
+                                    if pluggedIn, let image = TabletArtwork.connectionImage("usb") {
+                                        Image(nsImage: image).resizable().scaledToFit()
+                                            .frame(width: 16, height: 16).accessibilityHidden(true)
+                                    } else if let name = power.batteryIcon, let image = TabletArtwork.batteryImage(name) {
                                         Image(nsImage: image).resizable().scaledToFit()
                                             .frame(width: 24, height: 24).accessibilityHidden(true)
                                     }
-                                    Text(power.batteryDescription).foregroundStyle(.secondary).monospacedDigit()
+                                    Text(pluggedIn ? "Plugged in" : power.batteryDescription).foregroundStyle(.secondary).monospacedDigit()
                                 }
-                                statusRow("Charging status", power.chargingDescription)
+                                if !pluggedIn { statusRow("Charging status", power.chargingDescription) }
                             }.padding(10)
                         }
                     }
@@ -151,7 +155,7 @@ struct ContentView: View {
                     Text("Unofficial Wacom driver").font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
                     Text("WaccomDrive is an independent project. It is not affiliated with, endorsed by, or supported by Wacom.")
                     Text("Supported models").fontWeight(.semibold)
-                    Text("• Intuos Pro Large PTH-851/K — direct USB or Wacom USB wireless receiver (056A:0084).")
+                    Text("• Intuos Pro Medium PTH-651/K and Large PTH-851/K — direct USB or Wacom USB wireless receiver (056A:0084).")
                     Text("Provided as is, without warranty. Use at your own risk. Other models and native Bluetooth input are not supported.")
                 }
                 .font(.caption).foregroundStyle(.secondary)
@@ -201,6 +205,7 @@ struct ContentView: View {
 struct TabletPreview: View {
     let settings: DriverSettings
     let pen: PenSample
+    var tabletSize: CGSize = SupportedTablet.large.penSize
     var body: some View {
         GeometryReader { geo in
             let width = max(1, min(geo.size.width, geo.size.height * 321.327 / 209.983))
@@ -208,7 +213,7 @@ struct TabletPreview: View {
             // Bounds of the SVG surface layer, including the faces layer’s 0.347-point inset.
             let surface = CGRect(x: width * 44.458 / 321.327, y: height * 20.6693 / 209.983,
                                  width: width * 254.466 / 321.327, height: height * 168.6447 / 209.983)
-            let active = settings.activeArea(in: settings.displayBounds)
+            let active = settings.activeArea(in: settings.displayBounds, tabletSize: tabletSize)
             ZStack(alignment: .topLeading) {
                 TabletAsset(name: "mapping_faces").padding(width * 0.00108)
                 TabletAsset(name: "mapping_strokes")
@@ -219,8 +224,8 @@ struct TabletPreview: View {
                             y: surface.minY + surface.height * active.minY)
                 if pen.inProximity {
                     Circle().fill(Color.accentColor).frame(width: 8, height: 8)
-                        .offset(x: surface.minX + surface.width * Double(pen.x) / 65024 - 4,
-                                y: surface.minY + surface.height * Double(pen.y) / 40640 - 4)
+                        .offset(x: surface.minX + surface.width * Double(pen.x) / tabletSize.width - 4,
+                                y: surface.minY + surface.height * Double(pen.y) / tabletSize.height - 4)
                 }
             }
             .frame(width: width, height: height)

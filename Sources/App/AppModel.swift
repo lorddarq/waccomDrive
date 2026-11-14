@@ -42,6 +42,10 @@ final class AppModel: NSObject, ObservableObject {
     var connectionKind: TabletHardware.ConnectionKind {
         TabletHardware.connectionKind(tablet: tabletHardware, receiverPresent: receiverPresent)
     }
+    var tabletSize: CGSize { (SupportedTablet(rawValue: tabletHardware?.productID ?? wireless?.productID ?? 0) ?? .large).penSize }
+    var powerForDisplay: TabletPowerStatus? {
+        power ?? (usbInterfaces > 0 ? TabletPowerStatus(wirelessModuleInstalled: false, batteryPercent: nil, charging: nil) : nil)
+    }
     var inputAvailable: Bool { usbInterfaces > 0 || wireless?.supported == true }
     var connectionDescription: String {
         if tabletHardware?.bluetoothConnected == true { return "Bluetooth" }
@@ -60,7 +64,7 @@ final class AppModel: NSObject, ObservableObject {
         if tabletHardware?.bluetoothConnected == true { return "Connected over Bluetooth · input unavailable" }
         if usbInterfaces > 0 { return "Connected over USB" }
         if let wireless, wireless.connected { return wireless.supported ? "Connected through receiver" : "Unsupported wireless tablet" }
-        if let tabletHardware { return tabletHardware.productID == 0x0317 ? "Detected · input unavailable" : "Detected · unsupported model" }
+        if let tabletHardware { return SupportedTablet(rawValue: tabletHardware.productID) != nil ? "Detected · input unavailable" : "Detected · unsupported model" }
         return receiverPresent ? "Waiting for wireless tablet" : "Not connected"
     }
 
@@ -78,7 +82,8 @@ final class AppModel: NSObject, ObservableObject {
             self?.refreshInputState()
         }
         session.onPen = { [weak self] sample in
-            guard let self else { return }
+            // Background live previews must not compete with HID delivery on the main loop.
+            guard let self, NSApp.isActive else { return }
             let now = ProcessInfo.processInfo.systemUptime
             if now - lastPreview >= 0.05 || sample.buttons != pen.buttons || sample.inProximity != pen.inProximity || sample.inRange != pen.inRange {
                 pen = sample; lastPreview = now
@@ -90,7 +95,10 @@ final class AppModel: NSObject, ObservableObject {
             refreshInputState()
         }
         session.onPower = { [weak self] in self?.power = $0 }
-        session.onPad = { [weak self] in self?.pad = $0 }
+        session.onPad = { [weak self] sample in
+            guard let self, pad != sample else { return }
+            pad = sample
+        }
         session.onTouch = { [weak self] count, status in
             guard let self else { return }
             if touchContacts != count { touchContacts = count }
@@ -119,6 +127,7 @@ final class AppModel: NSObject, ObservableObject {
         activationObserver = NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 if let self {
+                    self.pen = self.session.decoder.sample
                     self.refreshLoginStatus()
                     if !self.inputAvailable { self.retryUSB() }
                 }
@@ -184,7 +193,7 @@ final class AppModel: NSObject, ObservableObject {
         var hardware = TabletHardware.read()
         if hardware == nil, let wireless, wireless.connected {
             hardware = TabletHardware(productID: wireless.productID,
-                name: wireless.supported ? "Wacom Intuos Pro Large · PTH-851/K" : String(format: "Wacom tablet · 056A:%04X", wireless.productID),
+                name: SupportedTablet(rawValue: wireless.productID)?.name ?? String(format: "Wacom tablet · 056A:%04X", wireless.productID),
                 serial: nil, bluetoothCapable: false, bluetoothConnected: false)
         }
         if hardware != tabletHardware { tabletHardware = hardware }

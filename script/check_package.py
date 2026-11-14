@@ -45,6 +45,13 @@ with tempfile.TemporaryDirectory(prefix='waccom-package-check-') as temporary:
     info = plistlib.loads((app / 'Contents/Info.plist').read_bytes())
     assert info['CFBundleIdentifier'] == 'local.waccomDrive'
     assert info.get('LSUIElement') is True, 'The app must remain a status-bar utility without a Dock icon'
+    assert info.get('CFBundleIconFile') == 'AppIcon', 'Bundle must advertise the app icon'
+    icon = app / 'Contents/Resources/AppIcon.icns'
+    iconset = temporary / 'AppIcon.iconset'
+    subprocess.run(['iconutil', '-c', 'iconset', str(icon), '-o', str(iconset)], check=True)
+    for size in (16, 32, 128, 256, 512):
+        for scale in ('', '@2x'):
+            assert (iconset / f'icon_{size}x{size}{scale}.png').is_file(), 'Missing app icon size'
     embedded = app / 'Contents/Resources/Uninstall WaccomDrive.command'
     assert embedded.read_bytes() == (root / 'packaging/Uninstall WaccomDrive.command').read_bytes()
     assert os.access(embedded, os.X_OK)

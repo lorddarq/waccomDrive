@@ -54,12 +54,16 @@ private struct StatusMenu: View {
     @ObservedObject var model: AppModel
     @Environment(\.openWindow) private var openWindow
     var body: some View {
-        Text("Wacom Intuos Pro Large")
+        Text(model.tabletHardware?.name ?? "Wacom Intuos Pro")
         Text(model.connectionDescription)
         Text(model.running ? "Driver active" : "Driver paused")
-        if let power = model.power {
-            Text(power.wirelessModuleInstalled ? "Wireless module installed" : "Wireless module not installed")
-            if power.wirelessModuleInstalled {
+        if let power = model.powerForDisplay {
+            if let reported = model.power {
+                Text(reported.wirelessModuleInstalled ? "Wireless module installed" : "Wireless module not installed")
+            }
+            if power.showsUSBPower(usbConnected: model.usbInterfaces > 0) {
+                Text("Power: Plugged in")
+            } else if power.wirelessModuleInstalled {
                 Text("Battery: \(power.batteryDescription) · \(power.chargingDescription)")
             }
         }
