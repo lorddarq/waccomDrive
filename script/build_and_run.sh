@@ -13,8 +13,10 @@ xcrun swiftc -swift-version 6 -warnings-as-errors -D APP -module-cache-path "$RO
 xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/*.swift -o "$ROOT_DIR/build/waccom-capture.new"
 mv "$ROOT_DIR/build/waccom-capture.new" "$ROOT_DIR/build/waccom-capture"
 "$ROOT_DIR/build/waccom-capture" --self-check
+xcrun swiftc -swift-version 6 -warnings-as-errors -D APP -module-cache-path "$ROOT_DIR/build/module-cache" Sources/*.swift Sources/App/TabletInputRuntime.swift script/check_input_thread.swift -o "$ROOT_DIR/build/check-input-thread"
+"$ROOT_DIR/build/check-input-thread"
 xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/WacomReceiver.swift script/check_tablet_hardware.swift -o "$ROOT_DIR/build/check-tablet-hardware"
-xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/Pen.swift Sources/PenOutput.swift Sources/ButtonMapper.swift Sources/Touch.swift Sources/TabletPowerStatus.swift Sources/WacomReceiver.swift Sources/WirelessStatus.swift Sources/TabletSession.swift Sources/Settings.swift Sources/PressureProfile.swift script/check_wireless.swift -o "$ROOT_DIR/build/check-wireless"
+xcrun swiftc -swift-version 6 -warnings-as-errors -module-cache-path "$ROOT_DIR/build/module-cache" Sources/Pen.swift Sources/Ruler.swift Sources/PenOutput.swift Sources/ButtonMapper.swift Sources/Touch.swift Sources/TabletPowerStatus.swift Sources/WacomReceiver.swift Sources/WirelessStatus.swift Sources/TabletSession.swift Sources/Settings.swift Sources/PressureProfile.swift script/check_wireless.swift -o "$ROOT_DIR/build/check-wireless"
 "$ROOT_DIR/build/check-wireless" captures/wireless-receiver.txt
 "$ROOT_DIR/build/check-tablet-hardware"
 "$ROOT_DIR/build/waccom-capture" --replay=captures/first-session-excerpt.txt

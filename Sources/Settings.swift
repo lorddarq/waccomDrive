@@ -57,6 +57,105 @@ struct PressureCurve: Codable, Equatable {
     }
 }
 
+struct PressureAnchor: Codable, Equatable {
+    var input: Double
+    var output: Double
+}
+
+struct EditablePressureCurve: Codable, Equatable {
+    enum Interpolation: String, Codable, CaseIterable { case linear, smooth }
+    var enabled = true
+    var interpolation: Interpolation = .smooth
+    var inverted = false
+    var anchors = [PressureAnchor(input: 0, output: 0), PressureAnchor(input: 0.5, output: 0.5), PressureAnchor(input: 1, output: 1)]
+
+    func inputRange(at index: Int) -> ClosedRange<Double> {
+        if index == 0 || index == anchors.count - 1 { return anchors[index].input...anchors[index].input }
+        return anchors[index - 1].input.nextUp...anchors[index + 1].input.nextDown
+    }
+
+    func outputRange(at index: Int) -> ClosedRange<Double> {
+        let previous = index > 0 ? anchors[index - 1].output : (inverted ? 1 : 0)
+        let next = index + 1 < anchors.count ? anchors[index + 1].output : (inverted ? 0 : 1)
+        return min(previous, next)...max(previous, next)
+    }
+
+    func validate() throws {
+        guard (2...8).contains(anchors.count), anchors.first?.input == 0, anchors.last?.input == 1,
+              anchors.allSatisfy({ $0.input.isFinite && $0.output.isFinite && (0...1).contains($0.input) && (0...1).contains($0.output) }),
+              zip(anchors, anchors.dropFirst()).allSatisfy({ a, b in
+                  a.input < b.input && (inverted ? a.output >= b.output : a.output <= b.output)
+              }) else {
+            throw SettingsError.invalid("Use 2–8 anchors with unique increasing inputs from 0% to 100% and outputs ordered in the selected direction.")
+        }
+    }
+
+    static func converting(_ settings: DriverSettings) -> Self {
+        Self(anchors: [0.0, 0.25, 0.5, 0.75, 1].map {
+            PressureAnchor(input: $0, output: settings.baselinePressureResponse($0))
+        })
+    }
+}
+
+// Piecewise cubic Hermite coefficients in normalized segment coordinates.
+// Prepared once per settings change, never in the HID report path.
+struct CompiledPressureCurve {
+    private struct Segment {
+        let x: Double, width: Double, a: Double, b: Double, c: Double, d: Double
+        let low: Double, high: Double
+    }
+    private var segments: [Segment] = []
+    private let first: Double
+    private let last: Double
+
+    init(_ curve: EditablePressureCurve) {
+        precondition((try? curve.validate()) != nil)
+        let points = curve.anchors
+        first = points[0].output; last = points[points.count - 1].output
+        let h = zip(points, points.dropFirst()).map { $1.input - $0.input }
+        // Limit only astronomically small intervals to keep intermediate arithmetic finite.
+        // Ordinary and close editable anchors retain their actual secants.
+        let delta = h.indices.map { (points[$0 + 1].output - points[$0].output) / max(h[$0], 1e-150) }
+        var slopes = Array(repeating: 0.0, count: points.count)
+        if points.count == 2 { slopes = [delta[0], delta[0]] }
+        else {
+            func endpoint(_ h0: Double, _ h1: Double, _ d0: Double, _ d1: Double) -> Double {
+                let ratio = h0 / (h0 + h1)
+                let slope = (1 + ratio) * d0 - ratio * d1
+                if slope * d0 <= 0 { return 0 }
+                if d0 * d1 <= 0 && abs(slope) > 3 * abs(d0) { return 3 * d0 }
+                return slope
+            }
+            slopes[0] = endpoint(h[0], h[1], delta[0], delta[1])
+            slopes[points.count - 1] = endpoint(h[h.count - 1], h[h.count - 2], delta[delta.count - 1], delta[delta.count - 2])
+            for i in 1..<(points.count - 1) where delta[i - 1] * delta[i] > 0 {
+                let weight = (2 * h[i] + h[i - 1]) / (3 * (h[i] + h[i - 1]))
+                let small = min(abs(delta[i - 1]), abs(delta[i]))
+                let magnitude = small / (weight * small / abs(delta[i - 1]) + (1 - weight) * small / abs(delta[i]))
+                slopes[i] = delta[i] > 0 ? magnitude : -magnitude
+            }
+        }
+        for i in h.indices {
+            let change = points[i + 1].output - points[i].output
+            let m0 = h[i] * slopes[i], m1 = h[i] * slopes[i + 1]
+            let smooth = curve.interpolation == .smooth
+            segments.append(Segment(x: points[i].input, width: h[i],
+                a: smooth ? m0 + m1 - 2 * change : 0,
+                b: smooth ? 3 * change - 2 * m0 - m1 : 0,
+                c: smooth ? m0 : change, d: points[i].output,
+                low: min(points[i].output, points[i + 1].output), high: max(points[i].output, points[i + 1].output)))
+        }
+    }
+    func response(_ input: Double) -> Double {
+        guard input.isFinite else { return first }
+        if input <= 0 { return first }
+        if input >= 1 { return last }
+        let segment = segments.first { input < $0.x + $0.width } ?? segments[segments.count - 1]
+        let t = (input - segment.x) / segment.width
+        return min(segment.high, max(segment.low, ((segment.a * t + segment.b) * t + segment.c) * t + segment.d))
+    }
+}
+
 struct TouchSettings: Codable, Equatable {
     var enabled = false
     var palmRejection = true
@@ -70,6 +169,76 @@ struct RingSettings: Codable, Equatable {
     var stepsPerShortcut = 3
 }
 
+enum PressureProcessingMode: String, Codable, CaseIterable, Identifiable {
+    case bypass, fixed, sampleAndHold, movingAverage, ema
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .bypass: "Bypass"
+        case .fixed: "Fixed"
+        case .sampleAndHold: "Sample and hold"
+        case .movingAverage: "Moving average"
+        case .ema: "EMA"
+        }
+    }
+}
+
+struct PressureProcessingSettings: Codable, Equatable {
+    var enabled = false
+    var mode: PressureProcessingMode = .ema
+    var fixedValue = 0.5
+    var sampleCount = 4
+    var acquisitionMilliseconds = 30.0
+    var windowMilliseconds = 12.0
+    var emaMilliseconds = 12.0
+    func validate() throws {
+        guard fixedValue.isFinite, (0...1).contains(fixedValue),
+              (1...64).contains(sampleCount),
+              acquisitionMilliseconds.isFinite, (1...100).contains(acquisitionMilliseconds),
+              windowMilliseconds.isFinite, (1...100).contains(windowMilliseconds),
+              emaMilliseconds.isFinite, (0...50).contains(emaMilliseconds) else {
+            throw SettingsError.invalid("Pressure processing parameters are outside their allowed ranges.")
+        }
+    }
+}
+
+struct PulledStringSettings: Codable, Equatable {
+    var enabled = false
+    var length = 12.0 // macOS logical screen points
+    var showGuide: Bool?
+    var guideVisible: Bool {
+        get { showGuide ?? true }
+        set { showGuide = newValue }
+    }
+    func validate() throws {
+        guard length.isFinite, (0...500).contains(length) else {
+            throw SettingsError.invalid("String length must be between 0 and 500 screen points.")
+        }
+    }
+}
+
+struct PressureSpeedSettings: Codable, Equatable {
+    var enabled = false
+    var slowSpeed = 0.0
+    var fastSpeed = 1000.0
+    var slowGain = 1.0
+    var fastGain = 1.0
+    var averagingMilliseconds = 0.0
+    func validate() throws {
+        guard [slowSpeed, fastSpeed, slowGain, fastGain, averagingMilliseconds].allSatisfy(\.isFinite),
+              (0...10000).contains(slowSpeed), (0...10000).contains(fastSpeed), slowSpeed < fastSpeed,
+              (0...4).contains(slowGain), (0...4).contains(fastGain),
+              (0...100).contains(averagingMilliseconds) else {
+            throw SettingsError.invalid("Speed thresholds must increase within 0–10,000 points/s, gains must be 0–4, and averaging must be 0–100 ms.")
+        }
+    }
+    func gain(at speed: Double) -> Double {
+        if slowGain == 1 && fastGain == 1 { return 1 }
+        let fraction = min(1, max(0, (speed - slowSpeed) / (fastSpeed - slowSpeed)))
+        return slowGain + fraction * (fastGain - slowGain)
+    }
+}
+
 struct DriverSettings: Codable, Equatable {
     var version = 1
     var displayUUID = ""
@@ -78,6 +247,37 @@ struct DriverSettings: Codable, Equatable {
     var areaX = 0.0, areaY = 0.0, areaWidth = 1.0, areaHeight = 1.0
     var sensitivity = 0.5
     var pressureCurve: PressureCurve?
+    var advancedPressureCurve: EditablePressureCurve?
+    var dedicatedInputThread: Bool?
+    var usesDedicatedInputThread: Bool {
+        get { dedicatedInputThread ?? true }
+        set { dedicatedInputThread = newValue }
+    }
+    var advancedFeatures: Bool?
+    var advancedFeaturesEnabled: Bool {
+        get { advancedFeatures ?? false }
+        set { advancedFeatures = newValue }
+    }
+    var ruler: RulerSettings?
+    var rulerSettings: RulerSettings {
+        get { ruler ?? RulerSettings() }
+        set { ruler = newValue }
+    }
+    var pressureSpeed: PressureSpeedSettings?
+    var speedSettings: PressureSpeedSettings {
+        get { pressureSpeed ?? PressureSpeedSettings() }
+        set { pressureSpeed = newValue }
+    }
+    var pulledString: PulledStringSettings?
+    var stringSettings: PulledStringSettings {
+        get { pulledString ?? PulledStringSettings() }
+        set { pulledString = newValue }
+    }
+    var pressureProcessing: PressureProcessingSettings?
+    var processingSettings: PressureProcessingSettings {
+        get { pressureProcessing ?? PressureProcessingSettings() }
+        set { pressureProcessing = newValue }
+    }
     var pressureSmoothing: Double?
     var smoothingMilliseconds: Double {
         get { pressureSmoothing ?? 12 }
@@ -121,6 +321,11 @@ struct DriverSettings: Codable, Equatable {
     func validate() throws {
         try Self.validatePressure(sensitivity: sensitivity, contactThreshold: contactThreshold)
         try pressureCurve?.validate()
+        try advancedPressureCurve?.validate()
+        try pressureProcessing?.validate()
+        try pulledString?.validate()
+        try pressureSpeed?.validate()
+        try ruler?.validate()
         guard smoothingMilliseconds.isFinite, (0...50).contains(smoothingMilliseconds) else {
             throw SettingsError.invalid("Pressure smoothing must be between 0 and 50 ms.")
         }
@@ -164,7 +369,14 @@ struct DriverSettings: Codable, Equatable {
 
     func pressure(_ raw: Int) -> Double {
         let input = min(1, max(0, Double(raw) / 2047))
-        return pressureCurve?.response(input) ?? pow(input, pow(4, 0.5 - sensitivity))
+        if advancedFeaturesEnabled, let curve = advancedPressureCurve, curve.enabled {
+            return CompiledPressureCurve(curve).response(input)
+        }
+        return baselinePressureResponse(input)
+    }
+
+    func baselinePressureResponse(_ input: Double) -> Double {
+        pressureCurve?.response(input) ?? pow(input, pow(4, 0.5 - sensitivity))
     }
 
     func activeArea(in bounds: CGRect, tabletSize: CGSize = SupportedTablet.large.penSize) -> CGRect {

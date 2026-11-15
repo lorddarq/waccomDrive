@@ -2,7 +2,7 @@ import Foundation
 import IOKit.hid
 import CoreGraphics
 
-// HID callbacks, timer, settings changes, and event posting share the main run loop.
+// HID callbacks, watchdog, settings changes and posting share one owning run loop.
 final class TabletSession {
     var decoder = PenDecoder()
     let output = PenOutput()
@@ -24,6 +24,7 @@ final class TabletSession {
     private var lastPowerReport = 0.0
     var onError: ((String) -> Void)?
     private var manager: IOHIDManager?
+    private var ownerRunLoop: CFRunLoop?
     private var watchdog: CFRunLoopTimer?
     private var devices: Set<CFHashCode> = []
     private var directModels: [CFHashCode: SupportedTablet] = [:]
@@ -51,7 +52,12 @@ final class TabletSession {
             onTouchEnabledChanged?(settings.enabled)
         }
     }
+    private var pendingSettings: DriverSettings?
+    private var pendingProfileOnly = false
+    var processingChangePending: Bool { pendingSettings != nil }
     func configure(_ settings: DriverSettings) {
+        if output.isContact { pendingSettings = settings; pendingProfileOnly = false; return }
+        pendingSettings = nil
         reset()
         buttons.configure(settings)
         output.settings = settings
@@ -61,13 +67,29 @@ final class TabletSession {
         publishTouch()
     }
     func refreshDisplayBounds() {
-        output.refreshDisplayBounds()
+        if output.refreshDisplayBounds() { reset() }
         touch.bounds = output.displayBounds
     }
     func applyPressureProfile(_ profile: PressureProfile) {
-        // Preserve held buttons and proximity while changing only pressure response.
-        profile.apply(to: &output.settings)
-        output.contactThreshold = profile.contactThreshold
+        var settings = pendingSettings ?? output.settings
+        profile.apply(to: &settings)
+        if output.isContact {
+            if pendingSettings == nil { pendingProfileOnly = true }
+            pendingSettings = settings
+        }
+        else {
+            output.settings = settings
+            output.contactThreshold = settings.contactThreshold
+        }
+    }
+    private func applyPendingSettings() {
+        guard !output.isContact, let settings = pendingSettings else { return }
+        if pendingProfileOnly {
+            pendingSettings = nil
+            pendingProfileOnly = false
+            output.settings = settings
+            output.contactThreshold = settings.contactThreshold
+        } else { configure(settings) }
     }
     func setPosting(_ enabled: Bool) {
         reset()
@@ -82,6 +104,7 @@ final class TabletSession {
         output.flags = buttons.flags
         output.heldMouse = buttons.heldMouse
         output.accept(decoder.reset())
+        applyPendingSettings()
         touch.updatePen(inRange: false)
         publishTouch()
     }
@@ -114,6 +137,7 @@ final class TabletSession {
         guard let loop = CFRunLoopGetCurrent() else { throw SettingsError.invalid("No current run loop.") }
         let manager = IOHIDManagerCreate(kCFAllocatorDefault, 0)
         self.manager = manager
+        ownerRunLoop = loop
         let matches: [[String: Any]] = (SupportedTablet.allCases.map(\.rawValue) + [WacomReceiver.productID]).map {
             [kIOHIDVendorIDKey: 0x056A, kIOHIDProductIDKey: $0, kIOHIDTransportKey: "USB"]
         }
@@ -139,6 +163,7 @@ final class TabletSession {
                 session.onError?("USB report error: \(result)")
                 return
             }
+            autoreleasepool {
             let device = Unmanaged<IOHIDDevice>.fromOpaque(sender).takeUnretainedValue()
             guard type == kIOHIDReportTypeInput, length > 0 else { return }
             let key = CFHash(device)
@@ -148,6 +173,7 @@ final class TabletSession {
                     session.receiverReport(bytes, id: id)
                 }
             } else if session.directModels[key] == session.output.tablet { session.report(bytes, id: id) }
+            }
         }, context)
         IOHIDManagerScheduleWithRunLoop(manager, loop, CFRunLoopMode.commonModes.rawValue)
         let result = IOHIDManagerOpen(manager, 0)
@@ -191,9 +217,9 @@ final class TabletSession {
         }
         if let manager {
             IOHIDManagerClose(manager, 0)
-            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
+            if let ownerRunLoop { IOHIDManagerUnscheduleFromRunLoop(manager, ownerRunLoop, CFRunLoopMode.commonModes.rawValue) }
         }
-        manager = nil
+        manager = nil; ownerRunLoop = nil
         powerStatus = nil; onPower?(nil)
         devices.removeAll(); directModels.removeAll(); receivers.removeAll(); receiverPenDevices.removeAll()
         wirelessStatus = nil; onWireless?(nil)
@@ -311,12 +337,13 @@ final class TabletSession {
             touch.updatePen(inRange: sample.inRange)
             publishTouch()
             if sample.inProximity {
-                buttons.location = output.mappedLocation(for: sample)
+                buttons.location = output.buttonLocation(for: sample)
             }
             _ = buttons.pen(sample.inProximity ? sample.buttons : 0)
             output.flags = buttons.flags
             output.heldMouse = buttons.heldMouse
             output.accept(sample)
+            applyPendingSettings()
             onPen?(sample)
             if logging { print("prox=\(sample.inProximity) x=\(sample.x) y=\(sample.y) pressure=\(sample.pressure) tilt=\(sample.tiltX),\(sample.tiltY) buttons=\(sample.buttons) tool=\(String(sample.toolID, radix: 16))") }
         }

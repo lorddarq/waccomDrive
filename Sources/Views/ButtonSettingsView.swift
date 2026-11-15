@@ -25,11 +25,10 @@ struct ActionPicker: View {
     }
 }
 
-struct PenSettingsView: View {
+struct PressureProfilesView: View {
     @ObservedObject var model: AppModel
     @State private var profileName = ""
     var body: some View {
-        Form {
             Section("Pressure profiles") {
                 Picker("Profile", selection: Binding(get: { model.selectedPressureProfile?.id }, set: { model.selectPressureProfile($0) })) {
                     Text("Custom").tag(UUID?.none)
@@ -51,16 +50,23 @@ struct PenSettingsView: View {
                     Button("Show JSON files") { model.showPressureProfiles() }.disabled(model.pressureProfiles.isEmpty)
                 }
                 if let profile = model.selectedPressureProfile,
-                   profile.sensitivity != model.draft.sensitivity || profile.contactThreshold != model.draft.contactThreshold || profile.pressureCurve != model.draft.pressureCurve || profile.pressureSmoothing != model.draft.pressureSmoothing {
+                   profile.sensitivity != model.draft.sensitivity || profile.contactThreshold != model.draft.contactThreshold || profile.pressureCurve != model.draft.pressureCurve || profile.pressureSmoothing != model.draft.pressureSmoothing || profile.advancedPressureCurve != model.draft.advancedPressureCurve {
                     Text("Modified profile. Update profile to replace its saved values.").font(.caption).foregroundStyle(.secondary)
                 }
                 Text("Profiles store the pressure curve, smoothing, and tip activation locally. Select a profile, then Save & Apply. Button cycling uses the displayed order.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+    }
+}
+
+struct PenSettingsView: View {
+    @ObservedObject var model: AppModel
+    var body: some View {
+        Form {
             Section("Pressure sensitivity") {
                 Toggle("Custom pressure curve", isOn: Binding(get: { model.draft.pressureCurve != nil }, set: { enabled in
                     if enabled {
-                        model.draft.pressureCurve = PressureCurve(light: model.draft.pressure(512), medium: model.draft.pressure(1024), firm: model.draft.pressure(1535))
+                        model.draft.pressureCurve = PressureCurve(light: model.draft.baselinePressureResponse(0.25), medium: model.draft.baselinePressureResponse(0.5), firm: model.draft.baselinePressureResponse(0.75))
                     } else { model.draft.pressureCurve = nil }
                 }))
                 if model.draft.pressureCurve == nil {
@@ -87,7 +93,7 @@ struct PenSettingsView: View {
                     var path = Path()
                     for index in 0...100 {
                         let point = CGPoint(x: size.width * Double(index) / 100,
-                                            y: size.height * (1 - model.draft.pressure(Int(Double(index) / 100 * 2047))))
+                                            y: size.height * (1 - model.draft.baselinePressureResponse(Double(index) / 100)))
                         if index == 0 { path.move(to: point) } else { path.addLine(to: point) }
                     }
                     context.stroke(path, with: .color(.accentColor), lineWidth: 2)

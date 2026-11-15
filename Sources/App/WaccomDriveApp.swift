@@ -74,6 +74,10 @@ private struct StatusMenu: View {
             } else { openWindow(id: "main") }
             NSApp.activate(ignoringOtherApps: true)
         }
+        Button(model.saved.rulerSettings.visible ? "Hide Ruler Guides" : "Show Ruler Guides") { model.toggleRulerGuide() }
+            .disabled(!model.saved.advancedFeaturesEnabled || !model.saved.rulerSettings.enabled || model.rulerEditing)
+        Button(model.rulerEditing ? "Finish Editing Rulers" : "Edit Rulers on Screen") { model.toggleRulerEditing() }
+            .disabled(!model.saved.advancedFeaturesEnabled || !model.saved.rulerSettings.enabled)
         Button(model.running ? "Pause Driver" : "Start Driver") { model.toggleDriver() }
         Divider()
         Button("Quit WaccomDrive") { NSApp.terminate(nil) }.keyboardShortcut("q")

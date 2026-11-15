@@ -8,6 +8,7 @@ struct PressureProfile: Codable, Equatable, Identifiable {
     var contactThreshold: Int
     var pressureCurve: PressureCurve?
     var pressureSmoothing: Double?
+    var advancedPressureCurve: EditablePressureCurve?
 
     func validate() throws {
         guard version == 1, (1...80).contains(name.trimmingCharacters(in: .whitespacesAndNewlines).count) else {
@@ -15,6 +16,7 @@ struct PressureProfile: Codable, Equatable, Identifiable {
         }
         try DriverSettings.validatePressure(sensitivity: sensitivity, contactThreshold: contactThreshold)
         try pressureCurve?.validate()
+        try advancedPressureCurve?.validate()
         if let pressureSmoothing, !pressureSmoothing.isFinite || !(0...50).contains(pressureSmoothing) {
             throw SettingsError.invalid("Pressure smoothing must be between 0 and 50 ms.")
         }
@@ -22,6 +24,7 @@ struct PressureProfile: Codable, Equatable, Identifiable {
     func apply(to settings: inout DriverSettings) {
         settings.sensitivity = sensitivity
         settings.pressureCurve = pressureCurve
+        settings.advancedPressureCurve = advancedPressureCurve
         settings.pressureSmoothing = pressureSmoothing
         settings.contactThreshold = contactThreshold
         settings.pressureProfileID = id

@@ -3,7 +3,7 @@ import SwiftUI
 import AppKit
 
 private enum Pane: String, CaseIterable, Identifiable {
-    case overview = "Overview", mapping = "Mapping", pen = "Pen", touch = "Touch", tablet = "Tablet buttons", settings = "Settings", help = "Help"
+    case overview = "Overview", mapping = "Mapping", pen = "Pen", touch = "Touch", tablet = "Tablet buttons", advanced = "Advanced", rulers = "Rulers", settings = "Settings", help = "Help"
     var id: String { rawValue }
     var icon: String {
         switch self {
@@ -12,6 +12,8 @@ private enum Pane: String, CaseIterable, Identifiable {
         case .pen: "pencil.tip"
         case .touch: "hand.point.up.left"
         case .tablet: "button.horizontal"
+        case .advanced: "slider.horizontal.3"
+        case .rulers: "ruler"
         case .settings: "gearshape"
         case .help: "questionmark.circle"
         }
@@ -21,6 +23,7 @@ private enum Pane: String, CaseIterable, Identifiable {
 struct ContentView: View {
     @ObservedObject var model: AppModel
     @State private var pane: Pane? = .overview
+    @State private var settingsTarget: String?
     var body: some View {
         NavigationSplitView {
             List(Pane.allCases, selection: $pane) { item in
@@ -57,8 +60,13 @@ struct ContentView: View {
                     case .pen: PenSettingsView(model: model)
                     case .touch: TouchSettingsView(model: model)
                     case .tablet: TabletButtonsView(model: model)
+                    case .advanced: AdvancedSettingsView(model: model)
+                    case .rulers: RulerSettingsView(model: model)
                     case .settings: settings
-                    case .help: PermissionHelpView(model: model)
+                    case .help: PermissionHelpView(model: model, openInputSettings: {
+                        settingsTarget = "input-thread"
+                        pane = .settings
+                    })
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
                 Divider()
@@ -168,6 +176,7 @@ struct ContentView: View {
         HStack { Text(name); Spacer(); Text(value).foregroundStyle(.secondary).multilineTextAlignment(.trailing) }
     }
     private var settings: some View {
+        ScrollViewReader { proxy in
         Form {
             Section("Installation and startup") {
                 LabeledContent("Installation", value: model.installed ? "Installed in Applications" : "Development build")
@@ -178,6 +187,21 @@ struct ContentView: View {
                 Button("Uninstall WaccomDrive…", role: .destructive) { model.beginUninstall() }
                     .disabled(!model.installed)
                 Text("Uninstall stops the driver and removes the installed app. Saved settings are kept unless you choose to remove them in the command-line uninstaller.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            PressureProfilesView(model: model)
+            Section("Input threading") {
+                Toggle("Use dedicated input thread", isOn: $model.draft.usesDedicatedInputThread)
+                Text("On by default. Changes require Save & Apply and an app restart. Off restores main-thread delivery.")
+                    .font(.caption).foregroundStyle(.secondary)
+                LabeledContent("Active input thread", value: model.inputThreadActive ? "Dedicated · user-interactive priority" : "Main thread")
+                if model.inputThreadRestartPending { Label("App restart required", systemImage: "arrow.clockwise") }
+            }
+            .id("input-thread")
+            Section("Pen delivery diagnostics") {
+                Button("Reset pen timing") { model.resetPenTiming() }
+                Button("Copy pen timing report") { model.copyPenTiming() }
+                Text("Reset, move the pen continuously for a few seconds, then copy. Reports measure input callback cadence and processing/posting time; they do not measure screen FPS or end-to-end latency.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Saved settings") {
@@ -199,6 +223,14 @@ struct ContentView: View {
                 Text("Nothing changes in the driver until you save.").font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped)
+        .task {
+            if let target = settingsTarget {
+                await Task.yield()
+                proxy.scrollTo(target, anchor: .top)
+                settingsTarget = nil
+            }
+        }
+        }
     }
 }
 

@@ -4,6 +4,7 @@ import AppKit
 
 struct PermissionHelpView: View {
     @ObservedObject var model: AppModel
+    let openInputSettings: () -> Void
     var body: some View {
         Form {
             Section("Set up tablet access") {
@@ -28,6 +29,12 @@ struct PermissionHelpView: View {
                 Button("Retry USB") { model.retryUSB() }
                 Button(model.running ? "Pause driver" : "Start driver") { model.toggleDriver() }
                 LabeledContent("Tablet", value: model.usbInterfaces > 0 ? "USB connected" : "Not connected")
+            }
+            Section("Smooth pen delivery") {
+                Text("Use dedicated input thread keeps pen delivery separate from busy interface work. It is on by default and works with Advanced features on or off.")
+                Button("Open Input Thread Settings", action: openInputSettings)
+                Text("After changing it, Save & Apply, then quit and reopen WaccomDrive. Turn it off to compare with main-thread delivery.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Already enabled, but still blocked?") {
                 Text("First quit and reopen WaccomDrive. If access still fails after an update or development rebuild, the permission entry may refer to an older copy. Remove that WaccomDrive entry with the minus button, add the app you are running with the plus button, and enable it again.")

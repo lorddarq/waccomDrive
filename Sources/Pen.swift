@@ -1,6 +1,6 @@
 import Foundation
 
-struct PenSample {
+struct PenSample: Equatable {
     var x = 0, y = 0, pressure = 0, tiltX = 0, tiltY = 0
     var inProximity = false
     var inRange = false
