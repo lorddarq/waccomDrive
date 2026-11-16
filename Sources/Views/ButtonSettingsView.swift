@@ -4,7 +4,8 @@ import SwiftUI
 struct ActionPicker: View {
     let title: String
     let pressed: Bool
-    var profilesAvailable = false
+    var profiles: [PressureProfile] = []
+    var profileTarget: Binding<UUID?> = .constant(nil)
     @Binding var action: ButtonAction
     @Binding var shortcut: CustomKeyShortcut?
     var body: some View {
@@ -13,10 +14,22 @@ struct ActionPicker: View {
             Circle().fill(pressed ? Color.green : (action == .none ? Color.secondary.opacity(0.25) : Color.accentColor)).frame(width: 8, height: 8)
                 .accessibilityLabel(pressed ? "Pressed" : "Released")
             Picker(title, selection: $action) {
-                ForEach(ButtonAction.allCases.filter { $0 != .cyclePressureProfile || profilesAvailable || $0 == action }) { item in
-                    Text(item.title).tag(item).disabled(item == .cyclePressureProfile && !profilesAvailable)
+                ForEach(ButtonAction.allCases) { item in
+                    Text(item.title).tag(item).disabled(
+                        item == .cyclePressureProfile && !profiles.contains { $0.scope == .basic } ||
+                        item == .cycleAdvancedProfile && !profiles.contains { $0.scope != .basic } ||
+                        item == .selectDrawingProfile && profiles.isEmpty)
                 }
             }
+          }
+          if action == .selectDrawingProfile {
+              Picker("Preset target", selection: profileTarget) {
+                  Text("Choose a preset").tag(UUID?.none)
+                  if let id = profileTarget.wrappedValue, !profiles.contains(where: { $0.id == id }) {
+                      Text("Unavailable preset · no action").tag(Optional(id))
+                  }
+                  ForEach(profiles) { profile in Text(profile.name + " · " + profile.scope.title).tag(Optional(profile.id)) }
+              }
           }
           if action == .customKey {
               ShortcutRecorder(shortcut: $shortcut).frame(width: 200, height: 24)
@@ -27,35 +40,49 @@ struct ActionPicker: View {
 
 struct PressureProfilesView: View {
     @ObservedObject var model: AppModel
-    @State private var profileName = ""
     var body: some View {
-            Section("Pressure profiles") {
-                Picker("Profile", selection: Binding(get: { model.selectedPressureProfile?.id }, set: { model.selectPressureProfile($0) })) {
-                    Text("Custom").tag(UUID?.none)
-                    ForEach(model.pressureProfiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
-                }
-                HStack {
-                    TextField("New profile name", text: $profileName)
-                    Button("Save as new") {
-                        model.savePressureProfile(name: profileName)
-                        if model.error == nil { profileName = "" }
-                    }.disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-                HStack {
-                    Button("Update profile") { model.savePressureProfile(name: "", updating: true) }
-                        .disabled(model.selectedPressureProfile == nil)
-                    Button("Delete profile", role: .destructive) { model.deletePressureProfile() }
-                        .disabled(model.selectedPressureProfile == nil)
-                    Spacer()
-                    Button("Show JSON files") { model.showPressureProfiles() }.disabled(model.pressureProfiles.isEmpty)
-                }
-                if let profile = model.selectedPressureProfile,
-                   profile.sensitivity != model.draft.sensitivity || profile.contactThreshold != model.draft.contactThreshold || profile.pressureCurve != model.draft.pressureCurve || profile.pressureSmoothing != model.draft.pressureSmoothing || profile.advancedPressureCurve != model.draft.advancedPressureCurve {
-                    Text("Modified profile. Update profile to replace its saved values.").font(.caption).foregroundStyle(.secondary)
-                }
-                Text("Profiles store the pressure curve, smoothing, and tip activation locally. Select a profile, then Save & Apply. Button cycling uses the displayed order.")
-                    .font(.caption).foregroundStyle(.secondary)
+        Section("Local drawing profiles") {
+            Picker("Profile", selection: Binding(get: { model.selectedPressureProfile?.id }, set: { model.selectPressureProfile($0) })) {
+                Text("Custom").tag(UUID?.none)
+                ForEach(model.pressureProfiles) { profile in Text(profile.name + " · " + profile.scope.title).tag(Optional(profile.id)) }
             }
+            if let profile = model.selectedPressureProfile {
+                LabeledContent("Changes", value: profile.scope.title)
+                Text(profile.matches(model.draft) ? "Matches saved profile" : "Modified · saved profile is unchanged")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button("Restore saved profile") { model.selectPressureProfile(profile.id) }
+                    Button("Update profile") { model.savePressureProfile(name: "", updating: true) }
+                    Button("Reset sections to defaults") { model.resetProfileSections() }
+                }
+            }
+            TextField("Profile name", text: $model.newProfileName)
+            HStack {
+                Button("Save as new") {
+                    model.savePressureProfile(name: model.newProfileName)
+                    if model.error == nil { model.newProfileName = "" }
+                }.disabled(model.newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Rename") { model.renamePressureProfile(model.newProfileName) }
+                    .disabled(model.selectedPressureProfile == nil || model.newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Duplicate") { model.renamePressureProfile(model.newProfileName, duplicate: true) }
+                    .disabled(model.selectedPressureProfile == nil || model.newProfileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Delete to Trash", role: .destructive) { model.deletePressureProfile() }.disabled(model.selectedPressureProfile == nil)
+            }
+            HStack {
+                Button("Import Profile…") { model.importPressureProfile() }
+                Button("Export Saved Profile…") { model.exportPressureProfile() }.disabled(model.selectedPressureProfile == nil)
+                Button("Show JSON files") { model.showPressureProfiles() }.disabled(model.pressureProfiles.isEmpty)
+            }
+            if model.profileDisplayRemapped {
+                Label("Ruler remapped to an active display. Review canvas alignment before drawing.", systemImage: "display")
+                    .font(.caption)
+            }
+            if model.processingChangePending { Label("Activation pending until pen lift", systemImage: "clock") }
+            Text("New and updated profiles capture all basic pressure and advanced drawing settings. Save & Apply activates them. Duplicate copies saved values. Imported older profiles retain their original scope. Button cycling follows this list: basic pressure and advanced presets cycle separately. Deleted targets do nothing.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("Stored locally as UUID JSON files. Profiles never change the Advanced features master, mapping, button assignments or input threading. Rulers use logical display points; missing displays are remapped visibly.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -122,7 +149,7 @@ struct PenSettingsView: View {
             }
             Section("Pen buttons") {
                 ForEach(0..<2, id: \.self) { index in
-                    ActionPicker(title: "Pen button \(index + 1)", pressed: model.pen.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.penButtons[index], shortcut: $model.draft[shortcut: "pen.\(index)"])
+                    ActionPicker(title: "Pen button \(index + 1)", pressed: model.pen.buttons & (1 << index) != 0, profiles: model.pressureProfiles, profileTarget: model.profileBinding("pen.\(index)"), action: $model.draft.penButtons[index], shortcut: $model.draft[shortcut: "pen.\(index)"])
                 }
                 Text("Press a side button to identify it by the live indicator. Hold actions and custom keys stay down until the button is released; preset shortcuts run once per press.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -204,7 +231,7 @@ struct TabletButtonsView: View {
         hoveredKey = inside ? index : (hoveredKey == index ? nil : hoveredKey)
     }
     private func mappingRow(index: Int, title: String) -> some View {
-        ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, profilesAvailable: !model.pressureProfiles.isEmpty, action: $model.draft.tabletButtons[index], shortcut: $model.draft[shortcut: "tablet.\(index)"])
+        ActionPicker(title: title, pressed: model.pad.buttons & (1 << index) != 0, profiles: model.pressureProfiles, profileTarget: model.profileBinding("tablet.\(index)"), action: $model.draft.tabletButtons[index], shortcut: $model.draft[shortcut: "tablet.\(index)"])
             .onChange(of: model.draft.tabletButtons[index]) { _, _ in selectedKey = index }
             .contentShape(Rectangle())
             .onHover { updateHover(index, $0) }

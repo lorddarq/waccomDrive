@@ -26,7 +26,7 @@
 
 The floating selector/edit bar was removed at the owner's request. Control-held
 editing remains the canvas entry point. Control–Option–R opens the semicircular
-picker for the five implemented families; numeric setup remains on Rulers. The menu bar remains a
+picker for the nine implemented families; numeric setup remains on Rulers. The menu bar remains a
 secondary editing/visibility entry point. Toolbar-specific pen-filter bypass
 state and its unused callbacks were removed with the bar.
 
@@ -49,7 +49,7 @@ Family-specific mode and tick handles avoid revisiting settings for routine adju
 
 Geometry, legacy JSON, projection/blend and native control/active-layer checks
 cover these additions. Physical pen/app timing and the new family controls still
-need acceptance. Ordinary ellipse/fisheye, the other remaining families and
+need acceptance. Fisheye and the remaining Bezier families and
 broader multi-display/fullscreen acceptance remain open. No whole family is
 claimed complete by this increment.
 
@@ -194,7 +194,7 @@ on Rulers, with explicit disable/custom payloads preserving older JSON. The pick
 uses a small non-key/non-activating panel and retained Core Animation/native SF
 Symbol controls. Its semicircle flips above/below the pointer and clamps to the
 nearest usable display. Hover/focus names, current marker, arrows/Tab, Enter,
-1–5 selection and Escape/repeated-shortcut/outside-click cancellation are provided.
+1–9 selection and Escape/repeated-shortcut/outside-click cancellation are provided.
 The center power button or G toggles ruler enablement (guide and snapping).
 Enabling also restores guide visibility; the Advanced master remains independent.
 

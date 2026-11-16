@@ -32,6 +32,19 @@ func checkPriorityRulerPipeline() throws {
         ruler.changesAxesAutomatically = true
         variants.append(ruler)
         switch kind {
+        case .straight:
+            ruler.constructionSettings.bounded = true; variants.append(ruler)
+        case .parallel:
+            ruler.constructionSettings.fixed = true; ruler.constructionSettings.offset = 13
+            ruler.constructionSettings.tolerance = 5; variants.append(ruler)
+        case .connected:
+            for target in 0...2 { ruler.constructionSettings.attachment = target; ruler.constructionSettings.stopAtStart = true; variants.append(ruler) }
+        case .ellipse:
+            for mode in RulerEllipseMode.allCases {
+                ruler.constructionSettings.sizing = mode; ruler.constructionSettings.radial = true
+                ruler.constructionSettings.connect = true; ruler.constructionSettings.circle = mode == .fixed
+                variants.append(ruler)
+            }
         case .radial:
             for bend in [-0.5, 0.5] { ruler.radialSettings.locked = false; ruler.radialSettings.bend = bend; variants.append(ruler) }
         case .isometric, .perspective:
@@ -704,7 +717,117 @@ func checkRulerConstructions() throws {
     print("Ruler constructions: camera orthogonality/1–3 point/infinite axes, accuracy, ticks, editing, legacy JSON, projective plane round trip, plane edits and concentric stroke locks passed.")
 }
 
+func checkNewRulerConstructions() throws {
+    func near(_ a: CGPoint, _ b: CGPoint, _ tolerance: Double = 0.03) -> Bool { hypot(a.x - b.x, a.y - b.y) < tolerance }
+    var r = RulerSettings(); r.enabled = true; r.accuracy = 1; r.kind = .straight
+    r.constructionSettings.start = RulerPoint(x: 0, y: 0)
+    r.constructionSettings.end = RulerPoint(x: 100, y: 0)
+    for bounded in [false, true] {
+        r.constructionSettings.bounded = bounded
+        for accuracy in [0.0, 0.5, 1.0] {
+            r.accuracy = accuracy
+            var p = RulerProjection(); p.configure(r)
+            let result = p.process(CGPoint(x: 150, y: 20), settings: r)
+            assert(near(result, CGPoint(x: 150 + ((bounded ? 100 : 150) - 150) * accuracy, y: 20 * (1 - accuracy))))
+        }
+    }
+    r.accuracy = 1
+    assert(r.editing(.corner(1), delta: CGPoint(x: -100, y: 0)) == nil)
+    r.kind = .parallel; r.angle = 0; r.centerX = 0; r.centerY = 0
+    r.constructionSettings.fixed = true; r.constructionSettings.spacing = 50; r.constructionSettings.offset = 10
+    r.constructionSettings.tolerance = 3
+    var p = RulerProjection(); p.configure(r)
+    assert(near(p.process(CGPoint(x: 1, y: 38), settings: r), CGPoint(x: 0, y: 60)))
+    assert(near(p.process(CGPoint(x: 48, y: -100), settings: r), CGPoint(x: 50, y: 60)), "Parallel branch retains pen-down offset")
+    p.finishStroke(settings: r)
+    assert(near(p.process(CGPoint(x: 20, y: -43), settings: r), CGPoint(x: 20, y: -40)))
+    r.constructionSettings.fixed = false; r.constructionSettings.tolerance = 0
+    p.configure(r)
+    _ = p.process(CGPoint(x: 10, y: 23), settings: r)
+    assert(near(p.process(CGPoint(x: 40, y: 80), settings: r), CGPoint(x: 40, y: 23)))
+    r.kind = .connected; r.constructionSettings.angleStep = 90
+    p.configure(r)
+    _ = p.process(.zero, settings: r)
+    assert(near(p.process(CGPoint(x: 100, y: 4), settings: r), CGPoint(x: 100, y: 0)))
+    p.finishStroke(settings: r)
+    assert(near(p.process(CGPoint(x: 105, y: 2), settings: r), CGPoint(x: 100, y: 0)))
+    assert(near(p.process(CGPoint(x: 102, y: 100), settings: r), CGPoint(x: 100, y: 98)))
+    p.finishStroke(settings: r)
+    r.constructionSettings.attachment = 1
+    assert(near(p.process(CGPoint(x: 100, y: 50), settings: r), CGPoint(x: 100, y: 49)))
+    p.reset()
+    assert(near(p.process(CGPoint(x: 7, y: 8), settings: r), CGPoint(x: 7, y: 8)), "Reset discards chain")
+    r.kind = .ellipse; r.angle = 37; r.centerX = 20; r.centerY = -40
+    r.constructionSettings.radiusX = 300; r.constructionSettings.radiusY = 0.1
+    let d = RulerGeometry.direction(r.angle)
+    let input = CGPoint(x: r.centerX + 320 * d.x, y: r.centerY + 320 * d.y)
+    let expected = CGPoint(x: r.centerX + 300 * d.x, y: r.centerY + 300 * d.y)
+    for accuracy in [0.0, 0.5, 1.0] {
+        r.accuracy = accuracy; p.configure(r)
+        assert(near(p.process(input, settings: r), CGPoint(x: input.x + (expected.x - input.x) * accuracy, y: input.y + (expected.y - input.y) * accuracy)))
+    }
+    r.accuracy = 1; r.angle = 0; r.centerX = 0; r.centerY = 0
+    r.constructionSettings.radiusX = 100; r.constructionSettings.radiusY = 50
+    r.constructionSettings.sizing = .concentric
+    p.configure(r)
+    assert(near(p.process(CGPoint(x: 200, y: 0), settings: r), CGPoint(x: 200, y: 0)))
+    assert(near(p.process(CGPoint(x: 0, y: 70), settings: r), CGPoint(x: 0, y: 100), 0.15))
+    assert(p.guideSettings(r).constructionSettings.radiusX == 200)
+    p.finishStroke(settings: r)
+    assert(near(p.process(CGPoint(x: 100, y: 0), settings: r), CGPoint(x: 100, y: 0)))
+    r.constructionSettings.sizing = .fixed; r.constructionSettings.radial = true
+    p.configure(r); _ = p.process(.zero, settings: r)
+    assert(near(p.process(CGPoint(x: 20, y: 20), settings: r), CGPoint(x: 20, y: 20)))
+    assert(near(p.process(CGPoint(x: 40, y: 0), settings: r), CGPoint(x: 20, y: 20)))
+    r.constructionSettings.radial = false; r.constructionSettings.connect = true
+    p.configure(r)
+    let first = p.process(CGPoint(x: 100, y: 0), settings: r)
+    _ = p.process(CGPoint(x: 0, y: 50), settings: r)
+    assert(p.process(CGPoint(x: 100, y: 0.5), settings: r) == first, "Endpoint capture closes the traced loop")
+    r.accuracy = 0.5; p.configure(r)
+    let partialStart = p.process(CGPoint(x: 110, y: 0), settings: r)
+    assert(near(partialStart, CGPoint(x: 100, y: 0)))
+    _ = p.process(CGPoint(x: 0, y: 60), settings: r)
+    assert(p.process(CGPoint(x: 110, y: 0.5), settings: r) == partialStart, "Connection captures both endpoints at partial accuracy")
+    r.accuracy = 1
+    p.configure(r)
+    _ = p.process(CGPoint(x: 0, y: 60), settings: r)
+    assert(near(p.process(.zero, settings: r), CGPoint(x: 0, y: 50), 0.15), "Ambiguous ellipse branches retain the previous side")
+    assert(p.process(CGPoint(x: 0, y: -0.001), settings: r).y > 0, "Center noise must not flip the ellipse branch")
+    for accuracy in [0.5, 1.0] {
+        var settings = DriverSettings(); settings.advancedFeaturesEnabled = true
+        settings.rulerSettings.enabled = true; settings.rulerSettings.accuracy = accuracy
+        settings.rulerSettings.kind = .connected
+        let output = PenOutput(); output.settings = settings
+        let a = PenSample(x: 10000, y: 10000, pressure: 1000, inProximity: true, toolID: 1)
+        var b = a; b.x = 20000
+        _ = output.events(for: a, time: 1); _ = output.events(for: b, time: 1.01)
+        let end = output.outputLocation
+        var hover = b; hover.pressure = 0
+        assert(output.events(for: hover, time: 1.02).first?.type == .leftMouseUp)
+        var next = b; next.x = 30000; next.y = 20000
+        let attached = output.events(for: next, time: 1.03)
+        assert(attached.last?.type == .leftMouseDown && near(attached.last!.location, end), "Real stroke boundaries attach at the delivered endpoint")
+        _ = output.events(for: PenSample(), time: 1.04)
+        assert(near(output.events(for: next, time: 1.05).last!.location, output.mappedLocation(for: next)), "Disconnect clears chain without synthetic contact")
+        next.toolID = 2
+        assert(near(output.events(for: next, time: 1.06).last!.location, output.mappedLocation(for: next)), "Tool switch clears chain")
+    }
+    for kind in [RulerKind.straight, .parallel, .connected, .ellipse] {
+        r.kind = kind; try r.validate()
+        let decoded = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(r))
+        assert(decoded == r)
+        for handle in r.editHandles { assert(r.editing(handle.id, delta: .zero) != nil) }
+    }
+    for bad in [0.0, -1, Double.infinity, Double.nan] {
+        var invalid = r; invalid.constructionSettings.radiusX = bad
+        do { try invalid.validate(); assertionFailure("Invalid radius accepted") } catch {}
+    }
+    print("New rulers: bounded/extended blend, collapsed endpoints, fixed/anchored parallel branches and magnetic ticks, retained chain attachments/reset, rotated thin ellipse, stroke-locked rings, radial snapping, handles and JSON passed.")
+}
+
 func checkRulers() throws {
+    try checkNewRulerConstructions()
     try checkRulerPickerShortcut()
     try checkPriorityRulerPipeline()
     try checkVanishingMeasurements()
@@ -804,7 +927,117 @@ func checkRulers() throws {
 
 }
 
+func checkDrawingPresets() throws {
+    func profileBytes(_ store: PressureProfileStore, _ id: UUID) -> Data { try! Data(contentsOf: store.directory.appendingPathComponent(id.uuidString + ".json")) }
+    let root = URL.temporaryDirectory.appendingPathComponent("waccom-presets-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = PressureProfileStore(directory: root.appendingPathComponent("profiles"))
+    var source = DriverSettings()
+    source.advancedFeaturesEnabled = true; source.stringSettings.enabled = true; source.stringSettings.length = 75
+    source.processingSettings.enabled = true; source.processingSettings.mode = .fixed; source.processingSettings.fixedValue = 0.7
+    source.advancedPressureCurve = EditablePressureCurve(); source.rulerSettings.enabled = true; source.rulerSettings.kind = .ellipse
+    source.rulerSettings.centerX = -800; source.rulerSettings.centerY = 300; source.speedSettings.enabled = true
+    let oldDisplay = PresetDisplay(uuid: UUID().uuidString, bounds: CGRect(x: -1600, y: 0, width: 1600, height: 1000))
+    let newDisplay = PresetDisplay(uuid: UUID().uuidString, bounds: CGRect(x: 0, y: 0, width: 1200, height: 800))
+    var profiles: [PressureProfile] = []
+    for scope in DrawingPresetScope.allCases {
+        let profile = PressureProfile.capture(name: scope.title, scope: scope, settings: source, display: oldDisplay)
+        try profile.validate(); assert(profile.matches(source))
+        try store.save(profile)
+        let restored = try PressureProfileStore.read(store.directory.appendingPathComponent(profile.id.uuidString + ".json"))
+        assert(restored == profile && restored.scope == scope)
+        var target = DriverSettings(); target.tabletButtons[1] = .shift; target.usesDedicatedInputThread = false
+        let before = target
+        restored.apply(to: &target)
+        assert(!target.advancedFeaturesEnabled && target.tabletButtons == before.tabletButtons && target.usesDedicatedInputThread == before.usesDedicatedInputThread)
+        assert(target.pressureProfileID == profile.id)
+        if scope.includes(.position) { assert(target.stringSettings == source.stringSettings) } else { assert(target.pulledString == before.pulledString) }
+        if scope.includes(.pressure) { assert(target.processingSettings == source.processingSettings) } else { assert(target.pressureProcessing == before.pressureProcessing) }
+        if scope.includes(.ruler) { assert(target.ruler == source.ruler) } else { assert(target.ruler == before.ruler) }
+        if scope.includes(.speed) { assert(target.pressureSpeed == source.pressureSpeed) } else { assert(target.pressureSpeed == before.pressureSpeed) }
+        if scope.includes(.curve) || scope == .basic { assert(target.advancedPressureCurve == source.advancedPressureCurve) } else { assert(target.advancedPressureCurve == before.advancedPressureCurve) }
+        if scope == .all { assert(target.sensitivity == source.sensitivity && target.contactThreshold == source.contactThreshold) }
+        else if scope != .basic { assert(target.sensitivity == before.sensitivity && target.contactThreshold == before.contactThreshold) }
+        profiles.append(profile)
+    }
+    source.sensitivity = 0.8; source.contactThreshold = 100; source.pressureSmoothing = 25
+    source.pressureCurve = PressureCurve(light: 0.3, medium: 0.6, firm: 0.9)
+    let full = PressureProfile.capture(name: "Everything", settings: source)
+    assert(full.scope == .all && full.matches(source))
+    try store.save(full)
+    let fullReloaded = try PressureProfileStore.read(store.directory.appendingPathComponent(full.id.uuidString + ".json"))
+    assert(fullReloaded == full)
+    var fullTarget = DriverSettings(); fullReloaded.apply(to: &fullTarget)
+    assert(fullTarget.sensitivity == 0.8 && fullTarget.contactThreshold == 100 && fullTarget.pressureCurve == source.pressureCurve && fullTarget.pressureSmoothing == 25)
+    assert(fullTarget.stringSettings == source.stringSettings && fullTarget.processingSettings == source.processingSettings && fullTarget.ruler == source.ruler && fullTarget.speedSettings == source.speedSettings && fullTarget.advancedPressureCurve == source.advancedPressureCurve)
+    assert(!fullTarget.advancedFeaturesEnabled)
+    fullTarget.sensitivity = 0.2; assert(!full.matches(fullTarget))
+    let implicit = PressureProfile.capture(name: "Defaults", scope: .combined, settings: DriverSettings())
+    assert(implicit.matches(DriverSettings()), "Implicit settings defaults are not modified values")
+    let combined = profiles.first { $0.scope == .combined }!
+    let (mapped, changed) = try combined.drawing!.remapped(to: [newDisplay])
+    assert(changed && mapped.display == newDisplay && mapped.ruler!.editingCenter == CGPoint(x: 600, y: 400))
+    assert(mapped.ruler!.constructionSettings.radiusX == source.rulerSettings.constructionSettings.radiusX)
+    var perspective = source; perspective.rulerSettings.kind = .perspectiveEllipse
+    perspective.rulerSettings.enableDepth(true); perspective.rulerSettings.depthSettings.offset = 30
+    perspective.rulerSettings.fixedReference = RulerPoint(x: 500, y: 400)
+    let (depth, _) = try DrawingPreset(scope: .ruler, settings: perspective, display: oldDisplay).remapped(to: [newDisplay])
+    let dx = depth.ruler!.corners[0].x - perspective.rulerSettings.corners[0].x
+    assert(depth.ruler!.depthSettings.offset == 30 && depth.ruler!.fixedReference!.x == 500 + dx)
+    assert(PressureProfile.next(in: profiles.reversed(), after: nil) == PressureProfile.sorted(profiles).first)
+    let settingsURL = root.appendingPathComponent("settings.json")
+    var backup = source; backup.pressureProfiles = profiles
+    try SettingsFile.write(backup, to: settingsURL)
+    let roundTrip = try SettingsFile.read(settingsURL)
+    assert(roundTrip == backup)
+    let original = try Data(contentsOf: store.directory.appendingPathComponent(combined.id.uuidString + ".json"))
+    var invalid = combined; invalid.version = 999
+    do { try store.save(invalid); assertionFailure("Unknown version accepted") } catch {}
+    assert(profileBytes(store, combined.id) == original)
+    var mismatch = combined; mismatch.drawing!.scope = .curve
+    do { try mismatch.validate(); assertionFailure("Out-of-scope payload accepted") } catch {}
+    let oversized = root.appendingPathComponent("oversized.json")
+    try Data(repeating: 32, count: 1_048_577).write(to: oversized)
+    do { _ = try PressureProfileStore.read(oversized); assertionFailure("Oversized JSON accepted") } catch {}
+    let link = root.appendingPathComponent("link.json")
+    try FileManager.default.createSymbolicLink(at: link, withDestinationURL: settingsURL)
+    do { _ = try SettingsFile.read(link); assertionFailure("Symlink accepted") } catch {}
+    // Force a failure after the first profile write, then compare exact old bytes.
+    let blocker = root.appendingPathComponent("not-a-directory")
+    try Data([1]).write(to: blocker)
+    var changedProfile = combined; changedProfile.name = "Changed"
+    do { try store.save([changedProfile], settings: source, to: blocker.appendingPathComponent("settings.json")); assertionFailure("Filesystem failure expected") } catch {}
+    assert(profileBytes(store, combined.id) == original)
+    let created = PressureProfile.capture(name: "Rollback new file", scope: .speed, settings: source)
+    do { try store.save([created], settings: source, to: blocker.appendingPathComponent("settings.json")); assertionFailure("Filesystem failure expected") } catch {}
+    assert(!FileManager.default.fileExists(atPath: store.directory.appendingPathComponent(created.id.uuidString + ".json").path))
+    let session = TabletSession(logging: false)
+    var active = DriverSettings(); active.advancedFeaturesEnabled = true
+    active.tabletButtons[1] = .shift; active.tabletButtons[2] = .rightClick; active.penButtons[0] = .rightClick
+    session.configure(active)
+    _ = session.buttons.pad(6); _ = session.buttons.pen(1)
+    let sample = PenSample(x: 12000, y: 12000, pressure: 1000, inProximity: true, toolID: 1)
+    _ = session.output.events(for: sample, time: 1)
+    session.applyPressureProfile(combined)
+    assert(session.processingChangePending && session.output.settings.pulledString == active.pulledString)
+    session.resetPen()
+    assert(!session.processingChangePending && session.output.settings.stringSettings == source.stringSettings)
+    assert(session.buttons.flags.contains(.maskShift) && session.buttons.heldMouse == .right, "Preset activation must preserve held pad modifiers and mouse buttons through lift")
+    assert(session.buttons.pad(0).map(\.type) == [.rightMouseUp, .flagsChanged])
+    var buttons = DriverSettings(); buttons.tabletButtons[1] = .cycleAdvancedProfile
+    buttons.penButtons[0] = .selectDrawingProfile; buttons.profileBindings = ["pen.0": combined.id]
+    try buttons.validate()
+    let mapper = ButtonMapper(); mapper.configure(buttons)
+    var actions: [UUID?] = []; mapper.onDrawingProfile = { actions.append($0) }
+    _ = mapper.pen(1); assert(actions.isEmpty); _ = mapper.releaseAll(); mapper.posting = true
+    _ = mapper.pen(1); _ = mapper.pen(1); _ = mapper.pad(2); _ = mapper.pad(2)
+    assert(actions.count == 2 && actions[0] == combined.id && actions[1] == nil)
+    _ = mapper.releaseAll(); assert(actions.count == 2)
+    print("Drawing presets: all scopes/legacy JSON, isolation/master preservation, restart/backup round trips, display/depth remap, deterministic cycling, invalid/oversized/symlink rejection, exact-file rollback, mid-stroke activation and held-button lifecycle passed. No events posted.")
+}
+
 func checkSettingsAndButtons() throws {
+    try checkDrawingPresets()
     var delivery = PenDeliveryTiming()
     for i in 0..<513 { delivery.record(arrival: Double(i) / 120, finished: Double(i) / 120 + 0.0001, inProximity: true, posted: 1) }
     delivery.recordMainLoopTick(0)

@@ -288,6 +288,7 @@ private final class RulerProbe {
         overlay.setEditing(false) { _ in }
         checkKeyboardEditing()
         checkCompactEllipseHandles()
+        checkNewFamilies()
         checkPicker()
         settings = nil
         Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
@@ -298,6 +299,20 @@ private final class RulerProbe {
                 NSApp.terminate(nil)
             }
         }
+    }
+    func checkNewFamilies() {
+        for kind in [RulerKind.straight, .parallel, .connected, .ellipse] {
+            settings = RulerSettings(); settings!.enabled = true; settings!.kind = kind
+            overlay.setEditing(true) { [weak self] in self?.settings = $0 }
+            checkSymbols()
+            let guides = NSApp.windows.filter { $0.title == "Ruler guide" && $0.isVisible }
+            assert(guides.allSatisfy { $0.ignoresMouseEvents && !$0.canBecomeKey })
+            let original = settings!
+            overlay.updateDrag(.move, delta: CGPoint(x: 12, y: 8), finished: true)
+            assert(hypot(settings!.editingCenter.x - original.editingCenter.x - 12, settings!.editingCenter.y - original.editingCenter.y - 8) < 1e-6)
+            overlay.setEditing(false) { _ in }
+        }
+        print("New family native guides: click-through panels, symbols, handles and committed movement passed.")
     }
     func checkPicker() {
         for screen in [CGRect(x: 0, y: 0, width: 1440, height: 900), CGRect(x: -1920, y: -400, width: 1920, height: 1080), CGRect(x: 0, y: 0, width: 200, height: 140)] {
@@ -318,9 +333,9 @@ private final class RulerProbe {
         var chosen: RulerPickerAction?
         assert(overlay.picker.present(current: .perspectiveEllipse, anchor: CGPoint(x: frame.midX, y: frame.midY), screens: [frame]) { chosen = $0 })
         let panel = NSApp.windows.first { $0.title == "Ruler picker" && $0.isVisible }!
-        assert(!panel.canBecomeKey && !panel.canBecomeMain && panel.frame.width <= 348 && panel.frame.height <= 220)
+        assert(!panel.canBecomeKey && !panel.canBecomeMain && panel.frame.width <= 508 && panel.frame.height <= 300)
         let buttons = panel.contentView!.subviews.compactMap { $0 as? NSButton }
-        assert(buttons.count == 6 && buttons.allSatisfy { $0.image != nil && $0.toolTip != nil })
+        assert(buttons.count == RulerPickerAction.all.count && buttons.allSatisfy { $0.image != nil && $0.toolTip != nil })
         let view = panel.contentView!
         panel.displayIfNeeded()
         if let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -329,10 +344,10 @@ private final class RulerProbe {
                 try! png.write(to: URL(fileURLWithPath: "build/ruler-picker-preview.png"))
             }
         }
-        assert(buttons[5].toolTip == "Turn ruler off · Guide and snapping")
-        buttons[5].performClick(nil); assert(chosen == .toggleRuler)
+        assert(buttons[RulerKind.allCases.count].toolTip == "Turn ruler off · Guide and snapping")
+        buttons[RulerKind.allCases.count].performClick(nil); assert(chosen == .toggleRuler)
         buttons[1].performClick(nil); assert(chosen == .ruler(.isometric))
-        overlay.picker.navigate(1); assert(overlay.picker.choice == .toggleRuler)
+        overlay.picker.navigate(RulerKind.allCases.count - 4); assert(overlay.picker.choice == .toggleRuler)
         overlay.picker.navigate(1); assert(overlay.picker.choice == .ruler(.perspective))
         let layout = overlay.picker.layout!, center = layout.centers[2]
         let native = CGPoint(x: layout.frame.minX + center.x, y: layout.frame.minY + center.y)
@@ -354,8 +369,8 @@ private final class RulerProbe {
         assert(!overlay.pickerPointer(type: .leftMouseDown, point: point), "Normal painting input must pass when picker is closed")
         assert(overlay.picker.present(current: .isometric, rulerEnabled: false, anchor: CGPoint(x: frame.midX, y: frame.midY), screens: [frame]) { chosen = $0 })
         let hiddenButtons = panel.contentView!.subviews.compactMap { $0 as? NSButton }
-        assert(hiddenButtons[5].toolTip == "Turn ruler on · Guide and snapping")
-        hiddenButtons[5].performClick(nil); assert(chosen == .toggleRuler)
+        assert(hiddenButtons[RulerKind.allCases.count].toolTip == "Turn ruler on · Guide and snapping")
+        hiddenButtons[RulerKind.allCases.count].performClick(nil); assert(chosen == .toggleRuler)
         overlay.finishPicker(nil)
         let shortcut = DriverSettings().pickerShortcut!
         overlay.pickerShortcut = { shortcut }

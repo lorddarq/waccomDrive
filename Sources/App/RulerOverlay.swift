@@ -121,7 +121,7 @@ final class RulerOverlay {
             case 53: choice = nil
             case 36, 76: choice = picker.choice
             case 5: choice = .toggleRuler
-            case 18, 19, 20, 21, 23: choice = picker.directChoice([18, 19, 20, 21, 23].firstIndex(of: key)!)
+            case 18, 19, 20, 21, 23, 22, 26, 28, 25: choice = picker.directChoice([18, 19, 20, 21, 23, 22, 26, 28, 25].firstIndex(of: key)!)
             default:
                 DispatchQueue.main.async { [weak self] in self?.finishPicker(nil) }
                 return false
@@ -355,6 +355,12 @@ final class RulerOverlay {
     private func handlePositions(_ settings: RulerSettings) -> [RulerHandleID: CGPoint] {
         var result: [RulerHandleID: CGPoint] = [:]
         var clearAreas: [CGRect] = []
+        if settings.kind == .ellipse {
+            let bounds = RulerGeometry.ordinaryEllipse(settings).reduce(CGRect.null) { rect, point in
+                rect.union(CGRect(origin: CGPoint(x: point.x, y: top - point.y), size: .zero))
+            }
+            if min(bounds.width, bounds.height) <= 240 { clearAreas.append(bounds.insetBy(dx: -24, dy: -24)) }
+        }
         if settings.kind == .perspectiveEllipse {
             var sections = [(settings.sectionCorners, settings.sectionRadius)]
             if settings.depthSettings.enabled { sections.append((settings.corners, settings.circleRadius)) }
@@ -465,6 +471,31 @@ private final class RulerGuideView: NSView {
             }
         }
         switch settings.kind {
+        case .straight, .parallel, .connected, .ellipse:
+            let path = CGMutablePath(), companion = CGMutablePath(), c = settings.constructionSettings
+            let direction = RulerGeometry.direction(settings.angle)
+            if settings.kind == .ellipse {
+                let scale = editing ? 1 : RulerGeometry.constructionScale(settings, through: anchor)
+                path.addLines(between: RulerGeometry.ordinaryEllipse(settings, scale: scale).map(local))
+                if c.radial {
+                    ray(companion, settings.center, CGPoint(x: anchor.x - settings.centerX, y: anchor.y - settings.centerY))
+                }
+            } else if settings.kind == .straight {
+                if c.bounded { path.addLines(between: [local(c.start.cg), local(c.end.cg)]) }
+                else { ray(path, c.start.cg, CGPoint(x: c.end.x - c.start.x, y: c.end.y - c.start.y)) }
+            } else {
+                let origin = settings.kind == .connected || c.fixed ? settings.center : anchor
+                if settings.kind == .parallel && c.fixed {
+                    for i in -20...20 {
+                        let offset = Double(i) * c.spacing + c.offset
+                        ray(path, CGPoint(x: origin.x - direction.y * offset, y: origin.y + direction.x * offset), direction)
+                    }
+                } else { ray(path, origin, direction) }
+                let selectedOrigin = settings.kind == .parallel ? RulerGeometry.parallelOrigin(settings, through: anchor) : origin
+                if settings.kind == .parallel && c.fixed { ray(companion, selectedOrigin, direction) }
+                measurements(path, family: 0, anchor: selectedOrigin, reference: false)
+            }
+            paths = [path, companion]
         case .radial:
             let fan = CGMutablePath(), selected = CGMutablePath()
             let bend = settings.radialSettings.bend
@@ -585,6 +616,9 @@ private final class RulerGuideView: NSView {
 private extension RulerHandleID {
     var title: String {
         switch self {
+        case .chainReset: "Reset connected chain"
+        case .parallelSpacing: "Parallel line spacing"
+        case .constructionMode: "Cycle ellipse size mode"
         case .move: "Move ruler"
         case .rotate: "Rotate ruler"
         case .size: "Resize ruler"
@@ -624,6 +658,9 @@ private extension RulerHandleID {
     }
     var symbolName: String {
         switch self {
+        case .chainReset: "arrow.counterclockwise"
+        case .parallelSpacing: "arrow.left.and.right"
+        case .constructionMode: "circle"
         case .move: "arrow.up.and.down.and.arrow.left.and.right"
         case .rotate: "arrow.clockwise"
         case .size, .ellipseRadius: "arrow.up.left.and.arrow.down.right"

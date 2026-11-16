@@ -3,7 +3,7 @@ import CoreGraphics
 import ColorSync
 
 enum ButtonAction: String, Codable, CaseIterable, Identifiable {
-    case none, rightClick, middleClick, undo, redo, brush, eraser, brushSmaller, brushLarger, space, shift, option, command, control, toggleTouch, cyclePressureProfile, customKey
+    case none, rightClick, middleClick, undo, redo, brush, eraser, brushSmaller, brushLarger, space, shift, option, command, control, toggleTouch, cyclePressureProfile, cycleAdvancedProfile, selectDrawingProfile, customKey
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -23,6 +23,8 @@ enum ButtonAction: String, Codable, CaseIterable, Identifiable {
         case .command: "Command"
         case .control: "Control"
         case .toggleTouch: "Touch on/off"
+        case .cycleAdvancedProfile: "Cycle advanced presets"
+        case .selectDrawingProfile: "Select drawing preset…"
         case .cyclePressureProfile: "Cycle pressure profiles"
         }
     }
@@ -289,9 +291,11 @@ struct DriverSettings: Codable, Equatable {
         set { pressureSmoothing = newValue }
     }
     var contactThreshold = 10
+    var profileBindings: [String: UUID]?
     var pressureProfileID: UUID?
     // Profile payload is used in backups/imports; live profiles have individual JSON files.
     var pressureProfiles: [PressureProfile]?
+    var rulerDisplay: PresetDisplay?
     var customShortcuts: [String: CustomKeyShortcut]?
     var rulerPickerShortcut: CustomKeyShortcut?
     var rulerPickerShortcutDisabled: Bool?
@@ -340,6 +344,7 @@ struct DriverSettings: Codable, Equatable {
         try pulledString?.validate()
         try pressureSpeed?.validate()
         try ruler?.validate()
+        try rulerDisplay?.validate()
         guard smoothingMilliseconds.isFinite, (0...50).contains(smoothingMilliseconds) else {
             throw SettingsError.invalid("Pressure smoothing must be between 0 and 50 ms.")
         }
@@ -353,6 +358,7 @@ struct DriverSettings: Codable, Equatable {
         }
         let bindings = [("pen", penButtons), ("tablet", tabletButtons)]
         let validKeys = Set(bindings.flatMap { prefix, actions in actions.indices.map { "\(prefix).\($0)" } })
+        guard (profileBindings ?? [:]).keys.allSatisfy({ validKeys.contains($0) }) else { throw SettingsError.invalid("Invalid preset button binding.") }
         for (key, shortcut) in customShortcuts ?? [:] {
             guard validKeys.contains(key) else {
                 throw SettingsError.invalid("Invalid custom keyboard shortcut.")
@@ -368,6 +374,9 @@ struct DriverSettings: Codable, Equatable {
             }
         }
         for (prefix, actions) in bindings {
+            for (index, action) in actions.enumerated() where action == .selectDrawingProfile {
+                guard profileBindings?["\(prefix).\(index)"] != nil else { throw SettingsError.invalid("Choose a target for each preset button.") }
+            }
             for (index, action) in actions.enumerated() where action == .customKey {
                 guard self[shortcut: "\(prefix).\(index)"] != nil else {
                     throw SettingsError.invalid("Record a shortcut for each custom button before saving.")
@@ -437,19 +446,34 @@ enum SettingsError: LocalizedError {
 struct SettingsFile {
     let url: URL
     init(url: URL = URL.applicationSupportDirectory.appendingPathComponent("WaccomDrive/settings.json")) { self.url = url }
+    static func readData(_ url: URL) throws -> Data {
+        let values = try url.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey, .isSymbolicLinkKey])
+        guard values.isRegularFile == true, values.isSymbolicLink != true, (values.fileSize ?? 0) <= 1_048_576 else {
+            throw SettingsError.invalid("JSON must be a regular file smaller than 1 MB.")
+        }
+        let data = try Data(contentsOf: url)
+        guard data.count <= 1_048_576 else { throw SettingsError.invalid("JSON exceeds 1 MB.") }
+        return data
+    }
     static func read(_ url: URL) throws -> DriverSettings {
-        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
-        guard size <= 1_048_576 else { throw SettingsError.invalid("Settings files must be smaller than 1 MB.") }
-        let settings = try JSONDecoder().decode(DriverSettings.self, from: Data(contentsOf: url))
+        let settings = try JSONDecoder().decode(DriverSettings.self, from: readData(url))
         try settings.validate()
         return settings
     }
-    static func write(_ settings: DriverSettings, to url: URL) throws {
-        try settings.validate()
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(settings)
+    static func jsonData<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(value)
+        guard data.count <= 1_048_576 else { throw SettingsError.invalid("JSON exceeds 1 MB.") }
+        return data
+    }
+    static func writeData(_ data: Data, to url: URL) throws {
+        if FileManager.default.fileExists(atPath: url.path) { _ = try readData(url) }
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
+    }
+    static func writeJSON<T: Encodable>(_ value: T, to url: URL) throws { try writeData(jsonData(value), to: url) }
+    static func write(_ settings: DriverSettings, to url: URL) throws {
+        try settings.validate()
+        try writeJSON(settings, to: url)
     }
 }

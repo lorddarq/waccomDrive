@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 struct PadSample: Equatable {
     let buttons: Int
@@ -13,6 +14,8 @@ struct PadSample: Equatable {
 }
 
 final class ButtonMapper {
+    var onDrawingProfile: ((UUID?) -> Void)?
+    private var activeProfiles = Set<UUID>()
     var onCyclePressureProfile: (() -> Void)?
     var onToggleTouch: (() -> Void)?
     var posting = false
@@ -61,14 +64,20 @@ final class ButtonMapper {
 
     private func update() -> [CGEvent] {
         var next = Set<ButtonAction>()
+        var nextProfiles = Set<UUID>()
         var nextShortcuts = Set<CustomKeyShortcut>()
         for (prefix, bits, actions) in [("pen", penBits, settings.penButtons), ("tablet", padBits, settings.tabletButtons)] {
             for (index, action) in actions.enumerated() where bits & (1 << index) != 0 && action != .none {
-                if action == .customKey {
+                if action == .selectDrawingProfile {
+                    if let id = settings.profileBindings?["\(prefix).\(index)"] { nextProfiles.insert(id) }
+                } else if action == .customKey {
                     if let shortcut = settings[shortcut: "\(prefix).\(index)"] { nextShortcuts.insert(shortcut) }
                 } else { next.insert(action) }
             }
         }
+        let pressedProfiles = nextProfiles.subtracting(activeProfiles)
+        activeProfiles = nextProfiles
+        if posting { for id in pressedProfiles.sorted(by: { $0.uuidString < $1.uuidString }) { onDrawingProfile?(id) } }
         let released = active.subtracting(next), pressed = next.subtracting(active)
         active = next
         var events: [CGEvent] = []
@@ -100,6 +109,10 @@ final class ButtonMapper {
         }
     }
     private func makeEvents(_ action: ButtonAction, down: Bool) -> [CGEvent] {
+        if action == .cycleAdvancedProfile {
+            if down && posting { onDrawingProfile?(nil) }
+            return []
+        }
         if action == .cyclePressureProfile {
             if down && posting { onCyclePressureProfile?() }
             return []

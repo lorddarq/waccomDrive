@@ -15,19 +15,19 @@ struct RulerPickerLayout {
     init?(anchor: CGPoint, screen: CGRect) {
         guard [anchor.x, anchor.y, screen.minX, screen.minY, screen.width, screen.height].allSatisfy(\.isFinite),
               screen.width >= 200, screen.height >= 140 else { return nil }
-        scale = min(1, (screen.width - 32) / 348, (screen.height - 32) / 220)
-        let size = CGSize(width: 348 * scale, height: 220 * scale)
-        opensUp = anchor.y + 176 * scale <= screen.maxY - 16
-        let y = anchor.y - (opensUp ? 44 : 176) * scale
+        scale = min(1, (screen.width - 32) / 508, (screen.height - 32) / 300)
+        let size = CGSize(width: 508 * scale, height: 300 * scale)
+        opensUp = anchor.y + 256 * scale <= screen.maxY - 16
+        let y = anchor.y - (opensUp ? 44 : 256) * scale
         frame = CGRect(x: min(screen.maxX - size.width - 16, max(screen.minX + 16, anchor.x - size.width / 2)),
                        y: min(screen.maxY - size.height - 16, max(screen.minY + 16, y)), width: size.width, height: size.height)
     }
-    func localY(_ y: Double) -> Double { (opensUp ? y : 220 - y) * scale }
+    func localY(_ y: Double) -> Double { (opensUp ? y : 300 - y) * scale }
     var centers: [CGPoint] {
         RulerKind.allCases.indices.map { i in
             let angle = Double.pi - Double(i) * .pi / Double(RulerKind.allCases.count - 1)
-            return CGPoint(x: (174 + 126 * cos(angle)) * scale, y: localY(44 + 126 * sin(angle)))
-        } + [CGPoint(x: 174 * scale, y: localY(108))]
+            return CGPoint(x: (254 + 206 * cos(angle)) * scale, y: localY(44 + 206 * sin(angle)))
+        } + [CGPoint(x: 254 * scale, y: localY(108))]
     }
     func hit(_ point: CGPoint) -> Int? {
         let local = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
@@ -91,15 +91,15 @@ private final class RulerPickerView: NSView {
         wantsLayer = true
         let shape = CAShapeLayer(), path = CGMutablePath()
         path.move(to: CGPoint(x: 8, y: 0)); path.addLine(to: CGPoint(x: 8, y: 44))
-        path.addArc(center: CGPoint(x: 174, y: 44), radius: 166, startAngle: .pi, endAngle: 0, clockwise: true)
-        path.addLine(to: CGPoint(x: 340, y: 0)); path.closeSubpath()
+        path.addArc(center: CGPoint(x: 254, y: 44), radius: 246, startAngle: .pi, endAngle: 0, clockwise: true)
+        path.addLine(to: CGPoint(x: 500, y: 0)); path.closeSubpath()
         var transform = CGAffineTransform(a: layout.scale, b: 0, c: 0, d: layout.opensUp ? layout.scale : -layout.scale,
-                                         tx: 0, ty: layout.opensUp ? 0 : 220 * layout.scale)
+                                         tx: 0, ty: layout.opensUp ? 0 : 300 * layout.scale)
         shape.path = path.copy(using: &transform)
         shape.fillColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
         shape.strokeColor = NSColor.separatorColor.cgColor; shape.lineWidth = 1
         layer?.addSublayer(shape)
-        let symbols = ["viewfinder", "cube", "line.diagonal", "sun.max", "circle", "power"]
+        let symbols = ["viewfinder", "cube", "line.diagonal", "sun.max", "circle", "line.diagonal", "line.3.horizontal", "point.topleft.down.to.point.bottomright.curvepath", "oval", "power"]
         for (i, action) in RulerPickerAction.all.enumerated() {
             let title = action == .toggleRuler ? (rulerEnabled ? "Turn ruler off" : "Turn ruler on") : RulerKind.allCases[i].title
             let center = layout.centers[i], size = 48 * layout.scale
@@ -118,7 +118,7 @@ private final class RulerPickerView: NSView {
         check.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
         check.contentTintColor = .systemGreen; check.setAccessibilityElement(false); addSubview(check)
         func labelFrame(y: Double, height: Double) -> CGRect {
-            CGRect(x: 82 * layout.scale, y: (layout.opensUp ? y : 220 - y - height) * layout.scale,
+            CGRect(x: 162 * layout.scale, y: (layout.opensUp ? y : 300 - y - height) * layout.scale,
                    width: 184 * layout.scale, height: height * layout.scale)
         }
         name.frame = labelFrame(y: 31, height: 20); name.font = .systemFont(ofSize: 13, weight: .medium)

@@ -77,6 +77,7 @@ struct ContentView: View {
                     if model.dirty { Button("Discard changes") {
                         NSApp.keyWindow?.makeFirstResponder(nil)
                         model.draft = model.saved
+                        model.profileDisplayRemapped = false
                     } }
                     Button("Save & Apply") { model.save() }
                 }.padding(16)

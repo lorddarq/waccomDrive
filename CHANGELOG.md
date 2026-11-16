@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.1.4 — 2026-11-17
+
+- Add an Advanced page with a shared **Advanced features** master switch, off by default; saved feature settings remain intact while bypassed.
+- Add pulled-string position stabilization, advanced pressure modes and editable response curves, and pressure gain controlled by raw pen speed.
+- Move tablet processing onto a dedicated input thread by default to keep drawing independent of UI stalls; retain an explicit main-thread option and delivery diagnostics.
+- Add cross-app rulers: perspective, isometric, vanishing lines, radial lines, perspective ellipse, straight line, parallel lines, connected lines and ordinary ellipse, with adjustable snapping accuracy and guide appearance.
+- Add Control-held guide editing, precise numeric geometry, keyboard movement/reset, and a Control–Option–R semicircular picker with direct 1–9 selection and ruler on/off.
+- Extend construction tools with camera perspective, scene-line matching, measurements, boxes, depth ellipses, concentric rings, magnetic ticks and connected-stroke attachments.
+- Save complete drawing profiles covering basic pressure and all advanced drawing settings. Add rename, duplicate, update, restore/defaults, Trash deletion and JSON import/export, while preserving older pressure/component profiles.
+- Add profile selection/cycling through pen buttons and ExpressKeys, whole-profile activation at pen lift, display-aware ruler remapping and recovery copies for failed backup restores. Profiles preserve the Advanced master and device configuration.
+- Expand geometry, JSON, replay, input-thread, held-button lifecycle and native UI checks. Existing settings are preserved during upgrade.
+
+**Distribution status:** Developer ID-signed installer, notarized by Apple with its ticket stapled. Gatekeeper verification passed.
+
+**Verification and limitations:** automated build/replay checks and native profile/ruler UI checks pass. Physical painting-app acceptance for the new straight/parallel/connected/ordinary ellipse modes and full-profile switching remains pending. Requires macOS 27 or later on Apple silicon.
+
 ## 0.1.3 — 2026-11-14
 
 - Added a new application icon, including standard and Retina sizes so you can find the driver faster in spotlight search or raycast.

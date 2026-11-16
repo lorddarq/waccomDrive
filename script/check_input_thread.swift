@@ -53,7 +53,7 @@ struct InputThreadCheck {
             // Deliberately stall the UI owner. Only dedicated input should keep running.
             Thread.sleep(forTimeInterval: 0.08)
             assert(signal.wait(timeout: .now()) == (dedicated ? .success : .timedOut))
-            for mode in 0..<11 {
+            for mode in 0..<15 {
                 runtime.perform { session in
                     session.reset()
                     var settings = session.output.settings
@@ -81,6 +81,14 @@ struct InputThreadCheck {
                         settings.rulerSettings.familyMeasurements = Array(repeating: RulerMeasurements(visible: true, distance: 40, divisions: 4), count: 3)
                         settings.rulerSettings.fixedReference = RulerPoint(x: 700, y: 600)
                         if mode == 10 { settings.rulerSettings.matchScene(true) }
+                    }
+                    if mode >= 11 {
+                        settings.rulerSettings.kind = [RulerKind.straight, .parallel, .connected, .ellipse][mode - 11]
+                        settings.rulerSettings.constructionSettings.bounded = true
+                        settings.rulerSettings.constructionSettings.fixed = true
+                        settings.rulerSettings.constructionSettings.tolerance = 5
+                        settings.rulerSettings.constructionSettings.sizing = .concentric
+                        settings.rulerSettings.constructionSettings.connect = true
                     }
                     session.configure(settings)
                 }

@@ -47,6 +47,9 @@ final class PenOutput {
     var outputLocation: CGPoint { location }
     private var rulerContactAnchor: CGPoint?
     var rulerGuideAnchor: CGPoint {
+        if settings.rulerSettings.kind == .ellipse, let direction = ruler.selected {
+            return CGPoint(x: settings.rulerSettings.centerX + direction.x, y: settings.rulerSettings.centerY + direction.y)
+        }
         if settings.rulerSettings.kind == .radial, let direction = ruler.selected {
             return RulerGeometry.radialPoint(center: settings.rulerSettings.center, direction: direction,
                 bend: settings.rulerSettings.radialSettings.bend, parameter: 100)
@@ -115,12 +118,13 @@ final class PenOutput {
             if let event = proximityEvent(entering: false, tool: toolID) { events.append(event) }
             proximity = false
         }
-        if !contact { string.reset(); ruler.reset(); rulerContactAnchor = nil }
+        if sample.toolID != toolID || !sample.inProximity { ruler.reset() }
+        if !contact { string.reset(); ruler.finishStroke(settings: settings.rulerSettings); rulerContactAnchor = nil }
         if let mapped {
             rawMappedLocation = mapped
             if contact {
                 if !down {
-                    string.reset(); ruler.reset()
+                    string.reset()
                 }
                 stringLocation = string.process(mapped, length: stringLength)
                 if !down { rulerContactAnchor = stringLocation }

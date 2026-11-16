@@ -56,7 +56,7 @@ XML
 # A single-file RTFD embeds a native image attachment and works with productbuild.
 swift -module-cache-path "$ROOT_DIR/build/module-cache" "$ROOT_DIR/script/installer_welcome.swift" "$ROOT_DIR/previews/$COVER" "$STAGE/resources/Welcome.rtfd"
 cat > "$STAGE/resources/ReadMe.txt" <<'TEXT'
-WaccomDrive — Wacom Intuos Pro Large PTH-851/K USB driver
+WaccomDrive — Wacom Intuos Pro Medium PTH-651/K and Large PTH-851/K driver
 
 Requires macOS 27 or later on Apple silicon.
 

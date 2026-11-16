@@ -10,6 +10,8 @@ import ServiceManagement
 @MainActor
 final class AppModel: NSObject, ObservableObject {
     @Published var draft = DriverSettings()
+    @Published var profileDisplayRemapped = false
+    @Published var newProfileName = ""
     @Published private(set) var pressureProfiles: [PressureProfile] = []
     @Published private(set) var saved = DriverSettings()
     @Published private(set) var usbInterfaces = 0
@@ -115,6 +117,9 @@ final class AppModel: NSObject, ObservableObject {
                     self?.wireless = status
                     self?.refreshInputState()
                 }
+            }
+            session.onDrawingProfile = { [weak self] id in
+                DispatchQueue.main.async { self?.activateDrawingProfile(id) }
             }
             session.onCyclePressureProfile = { [weak self] in
                 DispatchQueue.main.async { self?.cyclePressureProfile() }
@@ -232,7 +237,7 @@ final class AppModel: NSObject, ObservableObject {
                   let uuid = CGDisplayCreateUUIDFromDisplayID(id)?.takeRetainedValue(),
                   let text = CFUUIDCreateString(nil, uuid) as String? else { return nil }
             let bounds = CGDisplayBounds(id)
-            return ScreenChoice(id: text, name: screen.localizedName, size: "\(Int(bounds.width)) × \(Int(bounds.height))")
+            return ScreenChoice(id: text, name: screen.localizedName, size: "\(Int(bounds.width)) × \(Int(bounds.height))", bounds: bounds)
         }
     }
     private func refreshReceiver() {
@@ -279,48 +284,131 @@ final class AppModel: NSObject, ObservableObject {
         UserDefaults.standard.set(true, forKey: "driverEnabled")
         message = "Driver active. Changes take effect when you Save & Apply."
     }
+    var presetDisplays: [PresetDisplay] { screens.map { PresetDisplay(uuid: $0.id, bounds: $0.bounds) } }
+    private func capturedProfile(name: String, settings: DriverSettings? = nil) -> PressureProfile {
+        let settings = settings ?? draft
+        let displays = presetDisplays, center = settings.rulerSettings.editingCenter
+        let display = displays.first { $0.bounds.contains(center) } ?? displays.first
+        return PressureProfile.capture(name: name, settings: settings, display: display)
+    }
+    private func persistProfile(_ profile: PressureProfile) throws {
+        let existing = try profileStore.load()
+        guard !existing.contains(where: { $0.id != profile.id && $0.name.caseInsensitiveCompare(profile.name) == .orderedSame }) else {
+            throw SettingsError.invalid("A profile with this name already exists.")
+        }
+        try profileStore.save(profile)
+        pressureProfiles = PressureProfile.sorted(existing.filter { $0.id != profile.id } + [profile])
+    }
     func savePressureProfile(name: String, updating: Bool = false) {
+        error = nil
         let current = selectedPressureProfile
         let title = (updating ? current?.name ?? name : name).trimmingCharacters(in: .whitespacesAndNewlines)
-        let profile = PressureProfile(id: updating ? current?.id ?? UUID() : UUID(), name: title,
-                                      sensitivity: draft.sensitivity, contactThreshold: draft.contactThreshold, pressureCurve: draft.pressureCurve, pressureSmoothing: draft.pressureSmoothing, advancedPressureCurve: draft.advancedPressureCurve)
+        var profile = capturedProfile(name: title)
+        if updating, let current { profile.id = current.id }
         do {
-            guard !pressureProfiles.contains(where: { $0.id != profile.id && $0.name.caseInsensitiveCompare(title) == .orderedSame }) else {
-                throw SettingsError.invalid("A pressure profile with this name already exists.")
-            }
-            try profileStore.save(profile)
-            pressureProfiles = try profileStore.load()
+            try persistProfile(profile)
             draft.pressureProfileID = profile.id
-            message = "Pressure profile saved locally. Save & Apply to activate settings."
+            message = "\(profile.scope.title) profile saved locally. Save & Apply to activate settings."
         } catch { self.error = error.localizedDescription }
     }
+    func renamePressureProfile(_ name: String, duplicate: Bool = false) {
+        guard var profile = selectedPressureProfile else { return }
+        profile.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if duplicate {
+                if profile.scope == .all { profile.id = UUID() }
+                else {
+                    var values = draft
+                    let (prepared, _) = try preparedProfile(profile); prepared.apply(to: &values)
+                    profile = capturedProfile(name: profile.name, settings: values)
+                }
+            }
+            try persistProfile(profile)
+            draft.pressureProfileID = profile.id
+            message = duplicate ? "Profile duplicated locally." : "Profile renamed."
+        } catch { self.error = error.localizedDescription }
+    }
+    private func preparedProfile(_ profile: PressureProfile) throws -> (PressureProfile, Bool) {
+        try profile.validate()
+        guard let drawing = profile.drawing else { return (profile, false) }
+        let (remapped, changed) = try drawing.remapped(to: presetDisplays)
+        var result = profile; result.drawing = remapped
+        return (result, changed)
+    }
     func selectPressureProfile(_ id: UUID?) {
-        draft.pressureProfileID = id
-        pressureProfiles.first { $0.id == id }?.apply(to: &draft)
+        guard let id else { draft.pressureProfileID = nil; return }
+        guard let profile = pressureProfiles.first(where: { $0.id == id }) else { message = "Preset unavailable; current settings kept."; return }
+        do {
+            let (prepared, remapped) = try preparedProfile(profile)
+            var next = draft; prepared.apply(to: &next); try next.validate()
+            draft = next; profileDisplayRemapped = remapped
+            message = remapped ? "Ruler remapped to an active display. Review, then Save & Apply." : "Profile loaded for review. Save & Apply to activate."
+        } catch { self.error = error.localizedDescription }
+    }
+    func resetProfileSections() {
+        let scope = selectedPressureProfile?.scope ?? .basic
+        let defaults = PressureProfile.capture(name: "Defaults", scope: scope, settings: DriverSettings())
+        let id = draft.pressureProfileID
+        defaults.apply(to: &draft); draft.pressureProfileID = id
+        message = "\(scope.title) reset for review; saved profile unchanged."
     }
     func deletePressureProfile() {
         guard let id = draft.pressureProfileID else { return }
         do {
             try profileStore.delete(id)
-            pressureProfiles = try profileStore.load()
+            pressureProfiles.removeAll { $0.id == id }
             draft.pressureProfileID = nil
-            message = "Pressure profile moved to Trash."
+            message = "Profile moved to Trash. Active values and button releases are preserved; missing targets do nothing."
         } catch { self.error = error.localizedDescription }
     }
     func showPressureProfiles() { NSWorkspace.shared.open(profileStore.directory) }
-    private func cyclePressureProfile() {
-        guard !stopping else { return }
-        guard let profile = PressureProfile.next(in: pressureProfiles, after: saved.pressureProfileID) else { return }
-        var next = saved
-        profile.apply(to: &next)
+    func importPressureProfile() {
+        let panel = NSOpenPanel(); panel.title = "Import drawing profile"
+        panel.allowedContentTypes = [.json]; panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
+            let profile = try PressureProfileStore.read(url)
+            guard !pressureProfiles.contains(where: { $0.id == profile.id }) else { throw SettingsError.invalid("This profile ID already exists. Duplicate it first or restore it through a settings backup.") }
+            let (prepared, remapped) = try preparedProfile(profile)
+            var next = draft; prepared.apply(to: &next); try next.validate()
+            try persistProfile(prepared)
+            draft = next; profileDisplayRemapped = remapped
+            message = remapped ? "Profile imported; ruler remapped to an active display. Save & Apply to activate." : "Profile imported for review. Save & Apply to activate."
+        } catch { self.error = "Import rejected: \(error.localizedDescription). Active settings were kept." }
+    }
+    func exportPressureProfile() {
+        guard let profile = selectedPressureProfile else { return }
+        let panel = NSSavePanel(); panel.title = "Export saved drawing profile"
+        panel.allowedContentTypes = [.json]; panel.nameFieldStringValue = "Drawing-profile.json"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do { try profile.validate(); try SettingsFile.writeJSON(profile, to: url); message = "Saved profile exported; unsaved edits were not included." }
+        catch { self.error = error.localizedDescription }
+    }
+    func profileBinding(_ key: String) -> Binding<UUID?> {
+        Binding(get: { self.draft.profileBindings?[key] }, set: { value in
+            var bindings = self.draft.profileBindings ?? [:]; bindings[key] = value
+            self.draft.profileBindings = bindings.isEmpty ? nil : bindings
+        })
+    }
+    private func cyclePressureProfile() { activateDrawingProfile(nil, basicCycle: true) }
+    private func activateDrawingProfile(_ id: UUID?, basicCycle: Bool = false) {
+        guard !stopping else { return }
+        do {
+            pressureProfiles = try profileStore.load()
+            let profile = id.flatMap { id in pressureProfiles.first { $0.id == id } }
+                ?? (id == nil ? PressureProfile.next(in: pressureProfiles.filter { ($0.scope == .basic) == basicCycle }, after: saved.pressureProfileID) : nil)
+            guard let profile else { message = "Preset unavailable; current settings kept."; return }
+            let (prepared, remapped) = try preparedProfile(profile)
+            var next = saved; prepared.apply(to: &next); try next.validate()
+            var nextDraft = draft; prepared.apply(to: &nextDraft)
             try SettingsFile.write(next, to: file.url)
-            withSession { $0.applyPressureProfile(profile) }
+            // Existing profile activation changes only processing on the input
+            // owner, preserving held modifiers/mouse and deferring through lift.
+            withSession { $0.applyPressureProfile(prepared) }
             processingChangePending = withSession { $0.processingChangePending }
-            saved = next
-            profile.apply(to: &draft)
-            message = "Pressure profile: \(profile.name)"
-        } catch { self.error = "Could not activate pressure profile: \(error.localizedDescription)" }
+            saved = next; draft = nextDraft; profileDisplayRemapped = remapped
+            message = "Profile: \(profile.name)" + (remapped ? " · ruler remapped to an active display" : "")
+        } catch { self.error = "Could not activate profile: \(error.localizedDescription)" }
     }
     func toggleRulerEditing() {
         rulerOverlay.finishPicker(nil)
@@ -417,14 +505,19 @@ final class AppModel: NSObject, ObservableObject {
         if rulerEditing { toggleRulerEditing() }
         do {
             try draft.validate()
-            if let imported = draft.pressureProfiles {
-                for profile in imported { try profileStore.save(profile) }
-                pressureProfiles = try profileStore.load()
-            }
             var next = draft
-            next.pressureProfiles = nil
-            try SettingsFile.write(next, to: file.url)
-            withSession { [next] in $0.configure(next) }
+            let imported = next.pressureProfiles ?? []
+            next.pressureProfiles = nil; next.rulerDisplay = nil
+            let selected = (imported + pressureProfiles).first { $0.id == next.pressureProfileID }
+            let prepared = try selected.map { try preparedProfile($0).0 }
+            var profileChanges = saved; prepared?.apply(to: &profileChanges)
+            let profileOnly = prepared != nil && profileChanges == next
+            try profileStore.save(imported, settings: next, to: file.url)
+            if !imported.isEmpty { pressureProfiles = PressureProfile.sorted(pressureProfiles.filter { old in !imported.contains { $0.id == old.id } } + imported) }
+            withSession { [next] in
+                if profileOnly, let prepared { $0.applyPressureProfile(prepared) }
+                else { $0.configure(next) }
+            }
             processingChangePending = withSession { $0.processingChangePending }
             saved = next; draft = next
             message = "Settings saved and applied."
@@ -439,6 +532,7 @@ final class AppModel: NSObject, ObservableObject {
         do {
             var backup = saved
             backup.pressureProfiles = pressureProfiles
+            backup.rulerDisplay = presetDisplays.first { $0.bounds.contains(saved.rulerSettings.editingCenter) } ?? presetDisplays.first
             try SettingsFile.write(backup, to: url)
             message = "Backup saved to \(url.lastPathComponent)."
         }
@@ -452,9 +546,26 @@ final class AppModel: NSObject, ObservableObject {
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            let candidate = try SettingsFile.read(url)
-            draft = candidate
-            message = "Imported for review. Save & Apply to use these settings."
+            var candidate = try SettingsFile.read(url)
+            candidate.advancedFeaturesEnabled = draft.advancedFeaturesEnabled
+            var remapped = false
+            let source = candidate.rulerDisplay ?? candidate.pressureProfiles?.first { $0.id == candidate.pressureProfileID }?.drawing?.display
+            if let profiles = candidate.pressureProfiles {
+                candidate.pressureProfiles = try profiles.map { profile in
+                    let (prepared, changed) = try preparedProfile(profile); remapped = remapped || changed
+                    return prepared
+                }
+            }
+            if let ruler = candidate.ruler {
+                var payload = DrawingPreset(scope: .ruler, settings: candidate, display: source)
+                payload.ruler = ruler
+                let (prepared, changed) = try payload.remapped(to: presetDisplays)
+                candidate.ruler = prepared.ruler; remapped = remapped || changed
+            }
+            candidate.rulerDisplay = nil
+            try candidate.validate()
+            draft = candidate; profileDisplayRemapped = remapped
+            message = "Imported for review; Advanced features choice preserved." + (remapped ? " Ruler display remapped." : "") + " Save & Apply to use these settings."
         } catch { self.error = "Import rejected: \(error.localizedDescription). Current settings were kept." }
     }
     func stop() {
@@ -477,5 +588,6 @@ struct ScreenChoice: Identifiable {
     let id: String
     let name: String
     let size: String
+    let bounds: CGRect
 }
 #endif

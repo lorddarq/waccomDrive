@@ -18,7 +18,7 @@ struct RulerSettingsView: View {
                     Button("Clear") { model.draft.pickerShortcut = nil }.disabled(model.draft.pickerShortcut == nil)
                 }
                 Button(model.rulerPickerVisible ? "Close ruler picker" : "Open ruler picker") { model.toggleRulerPicker() }.disabled(!model.running)
-                Text("Default: Control–Option–R. Lift first, then choose by pen/click, arrows and Enter, or 1–5. G turns the ruler on/off. Escape cancels. Save & Apply after changing the shortcut. Selecting a ruler preserves Advanced and snapping settings.").font(.caption).foregroundStyle(.secondary)
+                Text("Default: Control–Option–R. Lift first, then choose by pen/click, arrows and Enter, or 1–9. G turns the ruler on/off. Escape cancels. Save & Apply after changing the shortcut. Selecting a ruler preserves Advanced and snapping settings.").font(.caption).foregroundStyle(.secondary)
                 number("Snapping accuracy (%)", value: Binding(get: { model.draft.rulerSettings.accuracy * 100 }, set: { model.draft.rulerSettings.accuracy = $0 / 100 }))
                 Slider(value: $model.draft.rulerSettings.accuracy, in: 0...1).accessibilityLabel("Snapping accuracy")
                 Slider(value: $model.draft.rulerSettings.opacity, in: 0.1...1).accessibilityLabel("Guide opacity")
@@ -127,6 +127,60 @@ struct RulerSettingsView: View {
                         if model.draft.rulerSettings.vanishingPoints.count > 1 { model.draft.rulerSettings.vanishingPoints.removeLast(); if model.draft.rulerSettings.sceneLines != nil { model.draft.rulerSettings.sceneLines?.removeLast() } }
                     })
                     }
+                case .straight, .parallel, .connected, .ellipse:
+                    if model.draft.rulerSettings.kind == .straight {
+                        number("Start X", value: $model.draft.rulerSettings.constructionSettings.start.x)
+                        number("Start Y", value: $model.draft.rulerSettings.constructionSettings.start.y)
+                        number("End X", value: $model.draft.rulerSettings.constructionSettings.end.x)
+                        number("End Y", value: $model.draft.rulerSettings.constructionSettings.end.y)
+                        Toggle("Bounded segment", isOn: $model.draft.rulerSettings.constructionSettings.bounded)
+                    } else {
+                        number("Center/reference X", value: $model.draft.rulerSettings.centerX)
+                        number("Center/reference Y", value: $model.draft.rulerSettings.centerY)
+                    }
+                    number("Angle (degrees)", value: Binding(get: {
+                        let r = model.draft.rulerSettings
+                        return r.kind == .straight ? atan2(r.constructionSettings.end.y - r.constructionSettings.start.y, r.constructionSettings.end.x - r.constructionSettings.start.x) * 180 / .pi : r.angle
+                    }, set: { value in
+                        if model.draft.rulerSettings.kind == .straight {
+                            var c = model.draft.rulerSettings.constructionSettings
+                            let length = hypot(c.end.x - c.start.x, c.end.y - c.start.y), d = RulerGeometry.direction(value)
+                            c.end = RulerPoint(x: c.start.x + length * d.x, y: c.start.y + length * d.y)
+                            model.draft.rulerSettings.constructionSettings = c
+                        } else { model.draft.rulerSettings.angle = value }
+                    }))
+                    if model.draft.rulerSettings.kind == .parallel {
+                        Toggle("Fixed reference", isOn: $model.draft.rulerSettings.constructionSettings.fixed)
+                        number("Parallel spacing", value: $model.draft.rulerSettings.constructionSettings.spacing)
+                        number("Parallel offset", value: $model.draft.rulerSettings.constructionSettings.offset)
+                        Text("Stroke-anchored lines pass through pen-down. Fixed reference selects the nearest parallel line at pen-down and retains it until lift.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if model.draft.rulerSettings.kind == .connected {
+                        Picker("Attach next segment to", selection: $model.draft.rulerSettings.constructionSettings.attachment) {
+                            Text("Chain start").tag(0); Text("Previous midpoint").tag(1); Text("Previous end").tag(2)
+                        }
+                        number("Angle increment (degrees)", value: $model.draft.rulerSettings.constructionSettings.angleStep)
+                        Toggle("Stop at attachment", isOn: $model.draft.rulerSettings.constructionSettings.stopAtStart)
+                        Button("Reset chain") { model.draft.rulerSettings.constructionSettings.resetID = model.draft.rulerSettings.constructionSettings.resetID &+ 1 }
+                        Text("Lift retains the chain. Save/apply, tool changes and disconnect clear it. Hold Control and click the reset arrow to begin a new chain.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if model.draft.rulerSettings.kind == .ellipse {
+                        number("Horizontal radius", value: $model.draft.rulerSettings.constructionSettings.radiusX)
+                        number("Vertical radius", value: $model.draft.rulerSettings.constructionSettings.radiusY)
+                        Toggle("Circle", isOn: $model.draft.rulerSettings.constructionSettings.circle)
+                        Picker("Size mode", selection: $model.draft.rulerSettings.constructionSettings.sizing) {
+                            Text("Fixed").tag(RulerEllipseMode.fixed)
+                            Text("Concentric (lock at pen-down)").tag(RulerEllipseMode.concentric)
+                            Text("Stepped concentric").tag(RulerEllipseMode.stepped)
+                        }
+                        number("Ring step", value: $model.draft.rulerSettings.circleStep)
+                        Toggle("Radial companion guide and snapping", isOn: $model.draft.rulerSettings.constructionSettings.radial)
+                        Toggle("Connect stroke endpoints", isOn: $model.draft.rulerSettings.constructionSettings.connect)
+                        if model.draft.rulerSettings.constructionSettings.connect { number("Endpoint capture tolerance (points)", value: $model.draft.rulerSettings.constructionSettings.tolerance) }
+                    } else {
+                        number("Magnetic tick tolerance (0 disables)", value: $model.draft.rulerSettings.constructionSettings.tolerance)
+                    }
+                    Text("Hold Control for move, rotation and endpoint/axis handles. Coordinates are screen points; 0% accuracy bypasses snapping exactly.").font(.caption).foregroundStyle(.secondary)
                 case .perspectiveEllipse:
                     Picker("Ellipse size", selection: $model.draft.rulerSettings.ellipseSizing) {
                         Text("Fixed ellipse").tag(RulerEllipseMode.fixed)

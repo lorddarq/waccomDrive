@@ -13,6 +13,7 @@ final class TabletSession {
     var onPen: ((PenSample) -> Void)?
     var onPad: ((PadSample) -> Void)?
     var onTouch: ((Int, String) -> Void)?
+    var onDrawingProfile: ((UUID?) -> Void)?
     var onCyclePressureProfile: (() -> Void)?
     var onTouchEnabledChanged: ((Bool) -> Void)?
     var onConnection: ((Int, Bool) -> Void)?
@@ -42,6 +43,7 @@ final class TabletSession {
         buttons.posting = posting
         touch.posting = posting
         output.contactThreshold = threshold
+        buttons.onDrawingProfile = { [weak self] in self?.onDrawingProfile?($0) }
         buttons.onCyclePressureProfile = { [weak self] in self?.onCyclePressureProfile?() }
         buttons.onToggleTouch = { [weak self] in
             guard let self else { return }

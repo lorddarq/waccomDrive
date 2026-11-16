@@ -118,7 +118,7 @@ WACCOM_SIGN_IDENTITY='Developer ID Application: Your Name (TEAMID)' ./script/bui
 
 - Settings: `~/Library/Application Support/WaccomDrive/settings.json`.
 - Pressure profiles: individual JSON files in `~/Library/Application Support/WaccomDrive/PressureProfiles/`. Manage them on Settings; backups include profiles.
-- Assign Cycle pressure profiles after creating profiles. Each press advances through the displayed list and applies it at the next pen lift if a stroke is active.
+- Assign Cycle pressure profiles after creating profiles. Each press advances through the displayed basic-pressure profiles and applies it at the next pen lift if a stroke is active.
 - Save & Apply activates changes; imported settings require Save & Apply.
 - Brush-size actions use the drawing app's `[` and `]` shortcuts.
 - CLI device inventory: `build/waccom-capture --probe`.
@@ -152,7 +152,7 @@ Sample-and-hold delivers a running average immediately, then freezes after N rep
 
 Pressure ordering is native raw / 2047 → existing response curve → selected processor → optional speed gain → final [0,1] clamp → tablet event. Contact/down/up always follows raw proximity and tip threshold, including fixed 0%. Position uses model-specific mapping independently; future speed must use raw mapped positions and monotonic timestamps before stabilization/projection.
 
-Pen lift, tool switch, session reset, pause, disconnect, and model changes clear processing history; release pressure is always zero. Save & Apply queues settings during contact and applies after lift; pressure-profile cycling queues only pressure settings and preserves held buttons. Preview reads input/output on a separate 20 Hz timer while the app is active. Optional settings live in settings.json; version-1 pressure-profile JSON remains unchanged. Settings owns profile management; Rulers has a separate navigation destination pending its own feature task.
+Pen lift, tool switch, session reset, pause, disconnect, and model changes clear processing history; release pressure is always zero. Save & Apply queues settings during contact and applies after lift; preset cycling queues only included drawing settings and preserves held buttons. Preview reads input/output on a separate 20 Hz timer while the app is active. Optional settings live in settings.json; version-1 pressure-profile JSON remains unchanged. Settings owns profile management; Rulers has its own sidebar page.
 
 Automated verification: compile Swift 6 with warnings as errors and run the diagnostic CLI --self-check, which includes timestamped pressure traces at 50, 133, 200 and 1,000 reports/second. These are generated-event checks, not evidence of live drawing performance. Long USB/receiver sessions, native keyboard/layout acceptance, and Krita plus another drawing app remain unverified for these advanced modes. No packaging, signing or release is implied.
 
@@ -162,7 +162,7 @@ Advanced → Use advanced curve explicitly opts into a separate curve; existing 
 
 Use 2–8 anchors including input endpoints 0% and 100%. Select an anchor and fine-tune its input/output pressure with sliders, drag a graph handle, use arrow keys for 0.1% changes, or enter both exact input/output percentages and choose Apply anchor. Sliders stop at neighboring anchors to preserve ordering; endpoint inputs stay fixed. Invalid or duplicate input positions and nonmonotone output are rejected without replacing the last valid curve. Add inserts between the selected anchor and its successor; Delete removes interior anchors. Linear reset, Soft, and Firm provide starting shapes. Inverted response explicitly reverses outputs; raw tip lift always releases with zero pressure. A maximum-output anchor before 100% input creates a plateau.
 
-Advanced curve data is optional in local settings and existing version-1 pressure profiles/backups. Older payloads remain readable and retain their prior response. Selecting a profile never enables the Advanced features master switch. Unified advanced preset management remains separate planned work. The graph edits draft settings; Save & Apply activates them after the current stroke.
+Advanced curve data is optional in local settings and existing version-1 pressure profiles/backups. Older payloads remain readable and retain their prior response. Selecting a profile never enables the Advanced features master switch. Component and combined advanced profiles are managed on Settings. The graph edits draft settings; Save & Apply activates them after the current stroke.
 
 ### Pulled-string position smoothing
 
@@ -170,7 +170,7 @@ Advanced → Enable pulled string adds a distance stabilizer after model/display
 
 Each stroke starts at the mapped pen point. Subsequent real contact reports hold that point while the pen remains within the string radius; beyond it, the output follows at the configured distance. Longer strings intentionally create distance lag and change corner handling. Pressure, tilt and buttons still update on held-position reports. Hover and button-only navigation stay direct. During a stabilized stroke, button actions use the last delivered position rather than jumping to raw input.
 
-Lift releases at the last delivered point with pressure zero, without a catch-up tail; later hover reports resume direct navigation. Stroke start, tool/model/display changes and session reset/pause/disconnect clear string history. The filter uses constant state and no timer, batching or screen queries per report. Raw mapped positions remain separately available for future speed calculation. Local settings/backups store the optional pulledString field; legacy payloads remain off. Advanced per-profile presets remain a separate task.
+Lift releases at the last delivered point with pressure zero, without a catch-up tail; later hover reports resume direct navigation. Stroke start, tool/model/display changes and session reset/pause/disconnect clear string history. The filter uses constant state and no timer, batching or screen queries per report. Raw mapped positions remain separately available for future speed calculation. Local settings/backups store the optional pulledString field; legacy payloads remain off. Position smoothing is included in complete drawing profiles on Settings.
 
 Automated string checks cover repeated points, taut distance, corners/circles, bypass gates, rotation/crop/aspect and model mapping, pressure/tilt while held, lift/hover/button behavior, and session lifecycle resets. Actual USB/receiver drawing and delivery-stall acceptance require physical testing of this feature.
 
@@ -186,15 +186,70 @@ Advanced → Enable speed pressure gain derives velocity from consecutive raw ma
 
 The order is raw pressure normalization → response curve → pressure processor → speed gain → final clamp to [0,1]. Fixed and sample-and-hold pressure may therefore vary with speed when explicitly enabled. Raw contact still owns down/up. First contact, invalid/nonfinite timestamps, intervals below 1 microsecond and gaps over 100 ms use neutral 1× gain and reseed history. Preview speed is bounded to 100,000 points/s to limit outliers; gains saturate by the configured fast threshold. Lift, pause, disconnect, tool/model/display/mapping/profile changes reset velocity history.
 
-Settings/backups store optional pressureSpeed data; absent data remains off. The shared Advanced features switch bypasses speed gain without erasing parameters. Save & Apply uses the existing stroke boundary; reset restores disabled neutral defaults. Live speed/gain use the existing foreground preview timer, only publish changed values, and show applied settings rather than unsaved drafts. No timers, queues, UI, or disk work were added to the HID path. Unified per-profile speed presets remain the separate presets task.
+Settings/backups store optional pressureSpeed data; absent data remains off. The shared Advanced features switch bypasses speed gain without erasing parameters. Save & Apply uses the existing stroke boundary; reset restores disabled neutral defaults. Live speed/gain use the existing foreground preview timer, only publish changed values, and show applied settings rather than unsaved drafts. No timers, queues, UI, or disk work were added to the HID path. Speed scaling is included in complete drawing profiles on Settings.
+
+### Local drawing profiles
+
+Settings → Local drawing profiles saves the complete drawing setup: basic pressure
+sensitivity, tip activation, baseline curve/smoothing, position smoothing, pressure
+processing, advanced response curve, ruler geometry/appearance and speed scaling.
+Save as new captures all current draft values. Update replaces all drawing values
+while retaining the UUID. Rename and Duplicate use the name field; Duplicate copies
+saved values. Restore and Reset sections to defaults affect draft settings;
+Save & Apply activates them. Older imported component profiles retain their scope
+until explicitly updated, which upgrades them to a complete profile. The modified
+label compares effective values, including implicit defaults. Files stay in
+`~/Library/Application Support/WaccomDrive/PressureProfiles/`.
+
+Version 1 pressure-only profiles remain readable and keep their original behavior.
+Version 2 adds an explicit `drawing.scope` and scoped payload; it never stores the
+Advanced master, mapping, threading or button assignments. Advanced effects remain
+subordinate to the current master. Import/export uses native JSON dialogs, and
+settings backups include all profiles. Imports are validated before writes;
+unsupported versions, malformed/oversized JSON and symlink files are rejected.
+Backup activation rolls back prior profile writes if a later write fails. Writes
+are individually atomic; a process crash or power failure during a multi-file
+restore is not a filesystem-wide transaction. A hidden `.restore-UUID` recovery
+folder retains original bytes and a destination list if rollback itself fails or
+the process stops during a restore.
+
+Assign Cycle pressure profiles for basic profiles, Cycle advanced presets for
+complete drawing profiles (and imported older component/combined profiles), or Select drawing preset for a particular
+UUID using the shared pen/ExpressKey action picker. Cycles follow the displayed
+name/UUID order. Missing targets do nothing. Selection/cycling never enables
+Advanced features. Preset-only activation preserves held buttons/modifiers and
+queues all included sections until lift; it resets processing histories together.
+Unrelated unsaved draft sections remain intact when cycling.
+
+Ruler presets record a display UUID and logical bounds. An imported preset whose
+display is absent is translated to the main display's center, preserving shape,
+size, plane/depth construction and fixed references; rearranged displays preserve
+relative placement. The UI reports remapping. Recheck canvas alignment after
+panning, zooming or display changes. Automated checks cover profile persistence,
+component isolation, import rollback and mid-stroke lifecycle; physical drawing-app
+acceptance remains separate.
 
 ### Ruler development build
 
 The Rulers page provides radial, isometric, perspective, vanishing-line and
-perspective-ellipse guides. Enable **Advanced features**, enable the ruler, then
+perspective-ellipse, straight, parallel, connected-line and ordinary ellipse guides. Enable **Advanced features**, enable the ruler, then
 **Save & Apply**. Accuracy 0% is guide-only; 100% projects contact positions after
 pulled-string smoothing. Guides use logical screen coordinates: realign them
 when you pan, zoom or rotate the painting canvas.
+
+Straight lines provide exact endpoints/angle and bounded or extended projection.
+Parallel lines either follow pen-down or retain the nearest fixed-reference offset
+for the stroke; spacing, offsets and magnetic measurement tolerance are editable.
+Connected lines retain chain start, previous midpoint and endpoint across lifts;
+each new stroke starts at the chosen attachment and locks to an angle increment.
+The reset-arrow handle starts a new chain. Applying settings, leaving proximity,
+tool changes and disconnect clear it without generating contact.
+Ordinary ellipses expose center, radii, rotation and a circle constraint. Fixed,
+concentric and stepped rings share the displayed projection curve; concentric size
+locks at pen-down. The radial companion snaps strokes starting near the center to
+a locked diameter; endpoint connection fully captures both ends even at partial accuracy after tracing a loop.
+New family geometry, input lifecycle and native controls have automated coverage;
+physical pen/app acceptance remains open.
 
 Hold **Control while lifted** to reveal edit handles over the painting app.
 Release Control after dragging to return to drawing. Choose the ruler and edit numeric values on the Rulers page. Dragging previews live; release validates and saves geometry.
@@ -205,9 +260,9 @@ changes visibility without changing snapping. Editing temporarily bypasses
 string and ruler position filters.
 
 Press **Control–Option–R** while lifted to open the semicircular ruler picker near
-the pen. It offers the five implemented rulers with SF Symbols, hover names and
+the pen. It offers the nine implemented rulers with SF Symbols, hover names and
 a current-ruler marker, and flips/clamps at display edges. Select by pen/mouse,
-arrows or Tab and Enter, or keys **1–5** from left to right. **Escape**, the same
+arrows or Tab and Enter, or keys **1–9** from left to right. **Escape**, the same
 shortcut again, or an outside click cancels. The center power button (or **G**)
 turns the ruler on/off (guide and snapping). Turning it on also shows its guide;
 the Advanced master must be enabled. The painting app keeps focus; menu

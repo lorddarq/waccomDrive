@@ -2,11 +2,15 @@ import Foundation
 import CoreGraphics
 
 enum RulerKind: String, Codable, CaseIterable, Identifiable {
-    case perspective, isometric, vanishing, radial, perspectiveEllipse
+    case perspective, isometric, vanishing, radial, perspectiveEllipse, straight, parallel, connected, ellipse
     var id: String { rawValue }
     var supportsAxisCycling: Bool { self == .isometric || self == .perspective || self == .vanishing }
     var title: String {
         switch self {
+        case .straight: "Straight line"
+        case .parallel: "Parallel lines"
+        case .connected: "Connected lines"
+        case .ellipse: "Ellipse"
         case .perspective: "Perspective"
         case .isometric: "Isometric"
         case .vanishing: "Vanishing lines"
@@ -217,7 +221,43 @@ struct RulerBoxSettings: Codable, Equatable {
     }
 }
 
+// Optional payload preserves older profiles and keeps new construction controls together.
+struct RulerConstruction: Codable, Equatable {
+    var start = RulerPoint(x: 400, y: 450)
+    var end = RulerPoint(x: 1000, y: 450)
+    var bounded = false
+    var fixed = false
+    var spacing = 50.0
+    var offset = 0.0
+    var tolerance = 0.0
+    var angleStep = 15.0
+    var attachment = 2 // start, midpoint, end
+    var stopAtStart = false
+    var resetID = 0
+    var radiusX = 300.0
+    var radiusY = 200.0
+    var circle = false
+    var sizing = RulerEllipseMode.fixed
+    var radial = false
+    var connect = false
+    func validate() throws {
+        let values = [start.x, start.y, end.x, end.y, spacing, offset, tolerance, angleStep, radiusX, radiusY]
+        guard values.allSatisfy({ $0.isFinite && abs($0) <= 100000 }),
+              hypot(end.x - start.x, end.y - start.y) >= 0.01,
+              (2...10000).contains(spacing), abs(offset) <= 10000, (0...100).contains(tolerance),
+              (1...180).contains(angleStep), (0...2).contains(attachment),
+              (0.01...10000).contains(radiusX), (0.01...10000).contains(radiusY) else {
+            throw SettingsError.invalid("Construction needs distinct endpoints, positive radii, spacing 2–10,000, tolerance 0–100 and angle step 1–180°.")
+        }
+    }
+}
+
 struct RulerSettings: Codable, Equatable {
+    var construction: RulerConstruction?
+    var constructionSettings: RulerConstruction {
+        get { construction ?? RulerConstruction() }
+        set { construction = newValue }
+    }
     var enabled = false
     var visible = true
     var kind = RulerKind.radial
@@ -227,6 +267,7 @@ struct RulerSettings: Codable, Equatable {
     var guideColors: [String: [RulerGuideColor?]]?
     var guideColorLabels: [String] {
         switch kind {
+        case .straight, .parallel, .connected, .ellipse: return ["Construction", "Active segment"]
         case .radial: return ["Radial lines", "Active ray"]
         case .perspectiveEllipse: return depthSettings.enabled ? ["Ellipse", "Construction plane", "Depth and tangents"] : ["Ellipse", "Construction plane"]
         case .isometric: return (1...3).map { "Axis \($0)" }
@@ -457,6 +498,7 @@ struct RulerSettings: Codable, Equatable {
     var vanishingPoints = [RulerPoint(x: 100, y: 400), RulerPoint(x: 1300, y: 400), RulerPoint(x: 700, y: -1200)]
     var corners = [RulerPoint(x: 400, y: 300), RulerPoint(x: 1000, y: 250), RulerPoint(x: 1100, y: 650), RulerPoint(x: 350, y: 700)]
     func validate() throws {
+        try constructionSettings.validate()
         if let point = fixedReference {
             guard [point.x, point.y].allSatisfy({ $0.isFinite && abs($0) <= 100000 }) else {
                 throw SettingsError.invalid("The fixed ruler reference must use finite screen coordinates within ±100,000 points.")
@@ -508,6 +550,32 @@ struct RulerSettings: Codable, Equatable {
 
 // Shared screen-point geometry for guide rendering and bounded projection.
 enum RulerGeometry {
+    static func constructionScale(_ settings: RulerSettings, through point: CGPoint) -> Double {
+        let c = settings.constructionSettings
+        guard c.sizing != .fixed else { return 1 }
+        let local = ellipseLocal(point, settings: settings)
+        let radius = hypot(local.x / c.radiusX, local.y / (c.circle ? c.radiusX : c.radiusY))
+        return max(0.001, min(20, c.sizing == .stepped ? (radius / settings.circleStep).rounded() * settings.circleStep : radius))
+    }
+    static func parallelOrigin(_ settings: RulerSettings, through point: CGPoint) -> CGPoint {
+        let c = settings.constructionSettings
+        guard c.fixed else { return point }
+        let d = direction(settings.angle), normal = CGPoint(x: -d.y, y: d.x)
+        let offset = ((point.x - settings.centerX) * normal.x + (point.y - settings.centerY) * normal.y - c.offset) / c.spacing
+        let distance = offset.rounded() * c.spacing + c.offset
+        return CGPoint(x: settings.centerX + normal.x * distance, y: settings.centerY + normal.y * distance)
+    }
+    static func ellipseLocal(_ point: CGPoint, settings: RulerSettings) -> CGPoint {
+        let d = direction(settings.angle), x = point.x - settings.centerX, y = point.y - settings.centerY
+        return CGPoint(x: x * d.x + y * d.y, y: -x * d.y + y * d.x)
+    }
+    static func ordinaryEllipse(_ settings: RulerSettings, scale: Double = 1) -> [CGPoint] {
+        let c = settings.constructionSettings, d = direction(settings.angle)
+        return (0...720).map { i in
+            let t = Double(i) * .pi / 360, x = cos(t) * c.radiusX * scale, y = sin(t) * (c.circle ? c.radiusX : c.radiusY) * scale
+            return CGPoint(x: settings.centerX + x * d.x - y * d.y, y: settings.centerY + x * d.y + y * d.x)
+        }
+    }
     static func line(_ point: CGPoint, origin: CGPoint, direction: CGPoint) -> CGPoint {
         let d = direction.x * direction.x + direction.y * direction.y
         guard d > 1e-12 else { return point }
@@ -556,6 +624,7 @@ enum RulerGeometry {
     }
     static func directions(_ settings: RulerSettings, anchor: CGPoint) -> [CGPoint] {
         switch settings.kind {
+        case .straight, .parallel, .connected, .ellipse: return [direction(settings.angle)]
         case .isometric: return settings.isometricAngles.map { direction($0 + settings.orientation) }
         case .perspective where settings.camera != nil:
             return settings.camera!.directions(center: settings.center, anchor: anchor)
@@ -739,8 +808,9 @@ enum RulerGeometry {
         let step = settings.circleStep
         return max(0.02, min(20, settings.ellipseSizing == .stepped ? (radius / step).rounded() * step : radius))
     }
-    static func nearest(_ point: CGPoint, on curve: [CGPoint]) -> CGPoint {
+    static func nearest(_ point: CGPoint, on curve: [CGPoint], previous: CGPoint? = nil) -> CGPoint {
         var result = point, distance = Double.infinity
+        var continuous: CGPoint?, continuousDistance = Double.infinity
         for i in 1..<curve.count {
             let a = curve[i - 1], b = curve[i]
             let dx = b.x - a.x, dy = b.y - a.y, denominator = dx * dx + dy * dy
@@ -749,12 +819,41 @@ enum RulerGeometry {
             let candidate = CGPoint(x: a.x + t * dx, y: a.y + t * dy)
             let delta = hypot(point.x - candidate.x, point.y - candidate.y)
             if delta < distance { result = candidate; distance = delta }
+            if let previous, hypot(candidate.x - previous.x, candidate.y - previous.y) <= 8, delta < continuousDistance {
+                continuous = candidate; continuousDistance = delta
+            }
         }
+        // Retain a distant, nearly tied branch through center noise, without
+        // biasing the ordinary nearest point along the same local arc.
+        if let continuous, continuousDistance <= distance + 0.25,
+           hypot(continuous.x - result.x, continuous.y - result.y) > 8 { return continuous }
         return result
     }
 }
 
 struct RulerProjection {
+    private var chainStart: CGPoint?
+    private var chainMidpoint: CGPoint?
+    private var chainEnd: CGPoint?
+    private var chainDirection: CGPoint?
+    private var lastConstructionPoint: CGPoint?
+    private var constructionOrigin: CGPoint?
+    private var constructionDirection: CGPoint?
+    private var ellipseScale = 1.0
+    private var ellipseStart: CGPoint?
+    private var ellipseTravel = false
+    mutating func finishStroke(settings: RulerSettings) {
+        if settings.kind == .connected, let start = anchor, let end = lastConstructionPoint,
+           hypot(end.x - start.x, end.y - start.y) >= 0.01 {
+            if chainStart == nil { chainStart = start }
+            chainMidpoint = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
+            chainEnd = end
+            chainDirection = constructionDirection
+        }
+        let saved = (chainStart, chainMidpoint, chainEnd, chainDirection)
+        reset()
+        (chainStart, chainMidpoint, chainEnd, chainDirection) = saved
+    }
     private(set) var anchor: CGPoint?
     private(set) var selected: CGPoint?
     private(set) var selectedFamily: Int?
@@ -765,6 +864,19 @@ struct RulerProjection {
     private var boxSegmentWorld = SIMD3<Double>.zero
     private var allDimensionsLearned: Bool { learnedExtents.allSatisfy { $0 != nil } }
     func guideSettings(_ settings: RulerSettings) -> RulerSettings {
+        if settings.kind == .ellipse, anchor != nil {
+            var next = settings
+            next.constructionSettings.radiusX *= ellipseScale
+            next.constructionSettings.radiusY *= ellipseScale
+            next.constructionSettings.sizing = .fixed
+            return next
+        }
+        if settings.kind == .connected, let origin = constructionOrigin ?? [chainStart, chainMidpoint, chainEnd][settings.constructionSettings.attachment] {
+            var next = settings; next.centerX = origin.x; next.centerY = origin.y
+            if let direction = constructionDirection ?? chainDirection { next.angle = atan2(direction.y, direction.x) * 180 / .pi }
+            return next
+        }
+
         guard settings.usesBox, settings.boxSettings.learnsDimensions, anchor != nil else { return settings }
         var next = settings
         next.boxSettings.extents = (0..<3).map { i in learnedExtents[i] ?? (abs(boxWorld[i]) >= 2 ? boxWorld[i] : settings.boxSettings.extents[i]) }
@@ -781,17 +893,20 @@ struct RulerProjection {
     private var candidate: CGPoint?
     private var candidateStart: CGPoint?
     private var curve: [CGPoint] = []
+    private var baseEllipse: [CGPoint] = []
     mutating func configure(_ settings: RulerSettings) {
         reset()
-        curve = settings.kind == .perspectiveEllipse ? RulerGeometry.projectedCircle(settings.sectionCorners, radius: settings.sectionRadius) ?? [] : []
+        curve = settings.kind == .ellipse ? RulerGeometry.ordinaryEllipse(settings) : settings.kind == .perspectiveEllipse ? RulerGeometry.projectedCircle(settings.sectionCorners, radius: settings.sectionRadius) ?? [] : []
+        baseEllipse = settings.kind == .ellipse ? curve : []
     }
-    mutating func reset() { anchor = nil; selected = nil; selectedFamily = nil; inputOffset = .zero; previousInput = nil; previousOutput = nil; turnOrigin = nil; turnInput = nil; boxPoints = []; boxVertex = 0; boxEdge = nil; learnedExtents = [Double?](repeating: nil, count: 3); boxWorld = .zero; boxSegmentWorld = .zero; radialParameter = nil; candidate = nil; candidateStart = nil }
+    mutating func reset() { chainStart = nil; chainMidpoint = nil; chainEnd = nil; chainDirection = nil; lastConstructionPoint = nil; constructionOrigin = nil; constructionDirection = nil; ellipseScale = 1; ellipseStart = nil; ellipseTravel = false; anchor = nil; selected = nil; selectedFamily = nil; inputOffset = .zero; previousInput = nil; previousOutput = nil; turnOrigin = nil; turnInput = nil; boxPoints = []; boxVertex = 0; boxEdge = nil; learnedExtents = [Double?](repeating: nil, count: 3); boxWorld = .zero; boxSegmentWorld = .zero; radialParameter = nil; candidate = nil; candidateStart = nil }
     mutating func process(_ point: CGPoint, settings: RulerSettings) -> CGPoint {
         if settings.enabled, settings.accuracy > 0, settings.changesAxesAutomatically,
            settings.kind.supportsAxisCycling, !settings.usesBox || settings.boxSettings.learnsDimensions && !allDimensionsLearned {
             inferAxisChange(point, settings: settings)
         }
         let result = project(point, settings: settings)
+        if settings.kind == .connected, anchor != nil { lastConstructionPoint = result }
         previousInput = point; previousOutput = result
         return result
     }
@@ -822,9 +937,18 @@ struct RulerProjection {
     }
     private mutating func project(_ point: CGPoint, settings: RulerSettings) -> CGPoint {
         guard settings.enabled, settings.accuracy > 0 else { return point }
-        let point = CGPoint(x: point.x + inputOffset.x, y: point.y + inputOffset.y)
+        var point = CGPoint(x: point.x + inputOffset.x, y: point.y + inputOffset.y)
         if anchor == nil {
-            anchor = point
+            let c = settings.constructionSettings
+            anchor = settings.kind == .connected ? ([chainStart, chainMidpoint, chainEnd][c.attachment] ?? point) : point
+            if settings.kind == .connected, let anchor {
+                inputOffset = CGPoint(x: anchor.x - point.x, y: anchor.y - point.y)
+                point = anchor
+            }
+            if settings.kind == .ellipse, c.sizing != .fixed, !c.radial || hypot(point.x - settings.centerX, point.y - settings.centerY) > settings.selectionDistance {
+                ellipseScale = RulerGeometry.constructionScale(settings, through: point)
+            }
+            if settings.kind == .ellipse { curve = ellipseScale == 1 ? baseEllipse : baseEllipse.map { CGPoint(x: settings.centerX + ($0.x - settings.centerX) * ellipseScale, y: settings.centerY + ($0.y - settings.centerY) * ellipseScale) } }
             boxPoints = RulerGeometry.boxVertices(settings, anchor: point) ?? []
             if settings.kind == .perspectiveEllipse, settings.ellipseSizing != .fixed {
                 curve = RulerGeometry.projectedCircle(settings.sectionCorners, radius: RulerGeometry.ellipseRadius(settings, through: point)) ?? []
@@ -832,7 +956,53 @@ struct RulerProjection {
         }
         let start = anchor!
         let projected: CGPoint
-        if settings.usesBox {
+        var connectEndpoint = false
+        if [.straight, .parallel, .connected, .ellipse].contains(settings.kind) {
+            let c = settings.constructionSettings
+            var origin = start, direction = RulerGeometry.direction(settings.angle)
+            if settings.kind == .ellipse {
+                if c.radial, hypot(start.x - settings.centerX, start.y - settings.centerY) <= settings.selectionDistance {
+                    if constructionDirection == nil, hypot(point.x - settings.centerX, point.y - settings.centerY) >= settings.selectionDistance {
+                        constructionDirection = CGPoint(x: point.x - settings.centerX, y: point.y - settings.centerY)
+                    }
+                    selected = constructionDirection
+                    projected = constructionDirection.map { RulerGeometry.line(point, origin: settings.center, direction: $0) } ?? settings.center
+                } else {
+                    let nearest = RulerGeometry.nearest(point, on: curve, previous: lastConstructionPoint)
+                    connectEndpoint = c.connect && ellipseStart == nil
+                    if ellipseStart == nil { ellipseStart = nearest }
+                    if hypot(nearest.x - ellipseStart!.x, nearest.y - ellipseStart!.y) > max(8, c.tolerance * 2) { ellipseTravel = true }
+                    let closing = c.connect && ellipseTravel && hypot(nearest.x - ellipseStart!.x, nearest.y - ellipseStart!.y) <= max(2, c.tolerance)
+                    connectEndpoint = connectEndpoint || closing
+                    projected = closing ? ellipseStart! : nearest
+                }
+            } else {
+                if settings.kind == .straight {
+                    origin = c.start.cg; direction = CGPoint(x: c.end.x - c.start.x, y: c.end.y - c.start.y)
+                } else if settings.kind == .parallel {
+                    if constructionOrigin == nil {
+                        constructionOrigin = RulerGeometry.parallelOrigin(settings, through: start)
+                    }
+                    origin = constructionOrigin!
+                } else {
+                    if constructionDirection == nil, hypot(point.x - start.x, point.y - start.y) >= settings.selectionDistance {
+                        let degrees = atan2(point.y - start.y, point.x - start.x) * 180 / .pi
+                        constructionDirection = RulerGeometry.direction(((degrees - settings.angle) / c.angleStep).rounded() * c.angleStep + settings.angle)
+                    }
+                    guard let chosen = constructionDirection else { return start }
+                    direction = chosen; constructionOrigin = start
+                }
+                let norm = hypot(direction.x, direction.y)
+                var distance = ((point.x - origin.x) * direction.x + (point.y - origin.y) * direction.y) / norm
+                let step = settings.measureSettings.distance / Double(settings.measureSettings.divisions)
+                let tick = (distance / step).rounded() * step
+                if abs(distance - tick) <= c.tolerance { distance = tick }
+                if settings.kind == .straight && c.bounded { distance = min(norm, max(0, distance)) }
+                if settings.kind == .connected && c.stopAtStart { distance = max(0, distance) }
+                projected = CGPoint(x: origin.x + distance * direction.x / norm, y: origin.y + distance * direction.y / norm)
+            }
+            lastConstructionPoint = projected; selectedFamily = settings.kind == .ellipse && selected != nil ? 1 : 0
+        } else if settings.usesBox {
             if settings.boxSettings.learnsDimensions && !allDimensionsLearned { projected = processLearningBox(point, settings: settings) }
             else { projected = boxPoints.isEmpty ? point : processBox(point, settings: settings) }
         } else if settings.kind == .perspectiveEllipse {
@@ -857,8 +1027,9 @@ struct RulerProjection {
                 projected = radial.point
             } else { projected = RulerGeometry.line(point, origin: start, direction: selected) }
         }
-        return CGPoint(x: point.x + (projected.x - point.x) * settings.accuracy,
-                       y: point.y + (projected.y - point.y) * settings.accuracy)
+        let accuracy = connectEndpoint ? 1 : settings.accuracy
+        return CGPoint(x: point.x + (projected.x - point.x) * accuracy,
+                       y: point.y + (projected.y - point.y) * accuracy)
     }
     @discardableResult
     mutating func cycleAxis(at output: CGPoint, input: CGPoint, settings: RulerSettings, preferredFamily: Int? = nil) -> Bool {
@@ -995,7 +1166,7 @@ struct RulerProjection {
 
 // Handle identities are shared by preview geometry and the native editor.
 enum RulerHandleID: Hashable {
-    case move, rotate, size, axis, isometricAxis(Int), isometricPreset, radialMode, radialBend, radialSpacing, boxMode, boxLearn, boxSize(Int), reference, axisPolicy, cameraAxis(Int), cameraCircle, viewTilt, fieldOfView, tickDistance, familyMeasure(Int), horizon, ellipseRadius, ellipseMode, ellipseDepthMode, ellipseDepth, ellipseVP, ellipseSceneMode, ellipseScenePoint(Int), ellipseScale, cameraMode, sceneMode, scenePoint(Int, Int), corner(Int), edge(Int), vanishing(Int)
+    case chainReset, parallelSpacing, constructionMode, move, rotate, size, axis, isometricAxis(Int), isometricPreset, radialMode, radialBend, radialSpacing, boxMode, boxLearn, boxSize(Int), reference, axisPolicy, cameraAxis(Int), cameraCircle, viewTilt, fieldOfView, tickDistance, familyMeasure(Int), horizon, ellipseRadius, ellipseMode, ellipseDepthMode, ellipseDepth, ellipseVP, ellipseSceneMode, ellipseScenePoint(Int), ellipseScale, cameraMode, sceneMode, scenePoint(Int, Int), corner(Int), edge(Int), vanishing(Int)
 }
 
 extension RulerSettings {
@@ -1006,7 +1177,8 @@ extension RulerSettings {
     var editingCenter: CGPoint {
         let points: [RulerPoint]
         switch kind {
-        case .radial, .isometric: return center
+        case .straight: return CGPoint(x: (constructionSettings.start.x + constructionSettings.end.x) / 2, y: (constructionSettings.start.y + constructionSettings.end.y) / 2)
+        case .parallel, .connected, .ellipse, .radial, .isometric: return center
         case .perspective where camera != nil: return center
         case .perspective, .vanishing: points = sceneLines?.flatMap { $0 } ?? vanishingPoints
         case .perspectiveEllipse: return RulerPlane(sectionCorners)?.screen(CGPoint(x: 0.5, y: 0.5)) ?? center
@@ -1032,6 +1204,18 @@ extension RulerSettings {
         }
         if kind == .perspective { result.append((.cameraMode, CGPoint(x: pivot.x - 70, y: pivot.y + 70))) }
         switch kind {
+        case .straight:
+            result += [(.corner(0), constructionSettings.start.cg), (.corner(1), constructionSettings.end.cg)]
+        case .parallel, .connected:
+            result.append((.tickDistance, CGPoint(x: pivot.x + 80, y: pivot.y + 80)))
+            if kind == .connected { result.append((.chainReset, CGPoint(x: pivot.x - 60, y: pivot.y + 60))) }
+            else { result.append((.parallelSpacing, CGPoint(x: pivot.x + 100, y: pivot.y))) }
+        case .ellipse:
+            for i in 0..<2 {
+                let d = RulerGeometry.direction(angle + Double(i) * 90), radius = i == 0 ? constructionSettings.radiusX : (constructionSettings.circle ? constructionSettings.radiusX : constructionSettings.radiusY)
+                result.append((.corner(i), CGPoint(x: pivot.x + d.x * radius, y: pivot.y + d.y * radius)))
+            }
+            result.append((.constructionMode, CGPoint(x: pivot.x - 60, y: pivot.y + 60)))
         case .radial:
             result += [(.radialMode, CGPoint(x: pivot.x - 60, y: pivot.y + 60)),
                        (.radialBend, CGPoint(x: pivot.x + 120, y: pivot.y)),
@@ -1126,8 +1310,19 @@ extension RulerSettings {
         func quantized(_ value: Double, step: Double) -> Double { snap ? (value / step).rounded() * step : value }
         func move(_ p: RulerPoint) -> RulerPoint { RulerPoint(x: p.x + delta.x, y: p.y + delta.y) }
         switch handle {
+        case .chainReset:
+            guard kind == .connected, hypot(delta.x, delta.y) < 3 else { return nil }
+            next.constructionSettings.resetID = constructionSettings.resetID &+ 1
+        case .parallelSpacing:
+            next.constructionSettings.spacing = max(2, min(10000, constructionSettings.spacing + delta.x))
+        case .constructionMode:
+            let modes = RulerEllipseMode.allCases
+            next.constructionSettings.sizing = modes[(modes.firstIndex(of: constructionSettings.sizing)! + 1) % modes.count]
         case .move:
             switch kind {
+            case .straight:
+                next.constructionSettings.start = move(constructionSettings.start); next.constructionSettings.end = move(constructionSettings.end)
+            case .parallel, .connected, .ellipse: next.centerX += delta.x; next.centerY += delta.y
             case .perspective where camera != nil: next.centerX += delta.x; next.centerY += delta.y
             case .radial, .isometric: next.centerX += delta.x; next.centerY += delta.y
             case .perspectiveEllipse:
@@ -1142,6 +1337,14 @@ extension RulerSettings {
                 next.vanishingPoints = vanishingPoints.map(move)
                 next.sceneLines = sceneLines?.map { $0.map(move) }
             }
+        case .corner(let index) where kind == .straight:
+            if index == 0 { next.constructionSettings.start = move(constructionSettings.start) }
+            else { next.constructionSettings.end = move(constructionSettings.end) }
+        case .corner(let index) where kind == .ellipse:
+            guard let p = editHandles.first(where: { $0.id == handle })?.point else { return nil }
+            let local = RulerGeometry.ellipseLocal(CGPoint(x: p.x + delta.x, y: p.y + delta.y), settings: self)
+            if index == 0 { next.constructionSettings.radiusX = abs(local.x) }
+            else { next.constructionSettings.radiusY = abs(local.y) }
         case .corner(let index):
             guard kind == .perspectiveEllipse, corners.indices.contains(index) else { return nil }
             let target = move(corners[index])
@@ -1332,6 +1535,9 @@ extension RulerSettings {
                                   y: pivot.y + dx * sin(radians) + dy * cos(radians))
             }
             switch kind {
+            case .straight:
+                next.constructionSettings.start = transform(constructionSettings.start); next.constructionSettings.end = transform(constructionSettings.end)
+            case .parallel, .connected, .ellipse: next.angle = (angle + radians * 180 / .pi).remainder(dividingBy: 360)
             case .radial: next.angle = (angle + radians * 180 / .pi).remainder(dividingBy: 360)
             case .isometric: next.orientation = (orientation + radians * 180 / .pi).remainder(dividingBy: 360)
             case .perspective where camera != nil:
