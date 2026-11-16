@@ -20,7 +20,7 @@ struct InputThreadCheck {
         let packets = text.split(whereSeparator: \.isNewline).filter { $0.hasPrefix("id=") }.map {
             $0.split(whereSeparator: \.isWhitespace).dropFirst(2).compactMap { UInt8($0, radix: 16) }
         }
-        var expected: [State] = []
+        var expected: [[State]] = []
         for dedicated in [false, true] {
             let runtime = TabletInputRuntime(dedicated: dedicated)
             runtime.perform { session in
@@ -53,15 +53,48 @@ struct InputThreadCheck {
             // Deliberately stall the UI owner. Only dedicated input should keep running.
             Thread.sleep(forTimeInterval: 0.08)
             assert(signal.wait(timeout: .now()) == (dedicated ? .success : .timedOut))
-            let trace = runtime.perform { session in
-                packets.map { bytes in
-                    session.report(bytes, id: UInt32(bytes.first ?? 0))
-                    return State(x: session.output.outputLocation.x, y: session.output.outputLocation.y,
-                                 contact: session.output.isContact)
+            for mode in 0..<11 {
+                runtime.perform { session in
+                    session.reset()
+                    var settings = session.output.settings
+                    settings.rulerSettings.kind = mode == 0 || mode == 4 ? .isometric : (mode == 1 ? .radial : .perspective)
+                    if (6..<9).contains(mode) { settings.rulerSettings.kind = .perspectiveEllipse }
+                    if mode >= 9 { settings.rulerSettings.kind = .vanishing }
+                    settings.rulerSettings.axisAngles = [20, 140, 90]
+                    settings.rulerSettings.radialSettings.locked = false
+                    settings.rulerSettings.radialSettings.bend = 0.3
+                    settings.rulerSettings.camera = mode >= 2 ? RulerCamera() : nil
+                    settings.rulerSettings.boxSettings.enabled = mode == 2 || mode == 3
+                    settings.rulerSettings.boxSettings.learnsDimensions = mode == 3
+                    settings.rulerSettings.changesAxesAutomatically = mode >= 4
+                    if mode == 5 {
+                        settings.rulerSettings.camera!.enableCustomAxes(true)
+                        settings.rulerSettings.camera!.worldAxesSettings[0].incline = 15
+                    }
+                    if (6..<9).contains(mode) {
+                        settings.rulerSettings.enableDepth(true)
+                        settings.rulerSettings.depthSettings.offset = 30
+                        settings.rulerSettings.depthSettings.scale = 1.2
+                        settings.rulerSettings.ellipseSizing = RulerEllipseMode.allCases[mode - 6]
+                    }
+                    if mode >= 9 {
+                        settings.rulerSettings.familyMeasurements = Array(repeating: RulerMeasurements(visible: true, distance: 40, divisions: 4), count: 3)
+                        settings.rulerSettings.fixedReference = RulerPoint(x: 700, y: 600)
+                        if mode == 10 { settings.rulerSettings.matchScene(true) }
+                    }
+                    session.configure(settings)
                 }
+                let trace = runtime.perform { session in
+                    packets.enumerated().map { index, bytes in
+                        session.report(bytes, id: UInt32(bytes.first ?? 0))
+                        if mode == 3, index % 20 == 0 { _ = session.output.cycleRulerAxis() }
+                        return State(x: session.output.outputLocation.x, y: session.output.outputLocation.y,
+                                     contact: session.output.isContact)
+                    }
+                }
+                if dedicated { assert(trace == expected[mode], "Threading must not change axis, radial, box, camera or depth-ellipse algorithms/lifecycle") }
+                else { expected.append(trace) }
             }
-            if dedicated { assert(trace == expected, "Threading must not change positional algorithms or lifecycle") }
-            else { expected = trace }
             runtime.perform { session in
                 session.reset()
                 assert(!session.output.isContact)

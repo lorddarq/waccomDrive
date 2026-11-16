@@ -41,21 +41,31 @@ final class PenOutput {
     private var string = PulledString()
     private var ruler = RulerProjection()
     private var stringLocation = CGPoint.zero
-    // Copied from UI only when overlay controls change; never query windows here.
-    var overlayControlBounds: [CGRect] = []
-    var overlayMenuTracking = false
-    private var overlayControlContact = false
+    private var controlWasHeld = false
     var rulerActive: Bool { settings.advancedFeaturesEnabled && settings.rulerSettings.enabled }
-    var rulerGuideSettings: RulerSettings? { posting && rulerActive && settings.rulerSettings.visible ? settings.rulerSettings : nil }
+    var rulerGuideSettings: RulerSettings? { posting && rulerActive && settings.rulerSettings.visible ? ruler.guideSettings(settings.rulerSettings) : nil }
     var outputLocation: CGPoint { location }
-    var rulerGuideAnchor: CGPoint { ruler.anchor ?? rawMappedLocation }
+    private var rulerContactAnchor: CGPoint?
+    var rulerGuideAnchor: CGPoint {
+        if settings.rulerSettings.kind == .radial, let direction = ruler.selected {
+            return RulerGeometry.radialPoint(center: settings.rulerSettings.center, direction: direction,
+                bend: settings.rulerSettings.radialSettings.bend, parameter: 100)
+        }
+        return ruler.anchor ?? rulerContactAnchor ?? rawMappedLocation
+    }
     var rulerGuideFamily: Int? {
-        guard down, rulerActive, let anchor = ruler.anchor, let selected = ruler.selected else { return nil }
-        return RulerGeometry.directions(settings.rulerSettings, anchor: anchor).firstIndex(of: selected)
+        guard down, rulerActive else { return nil }
+        if settings.rulerSettings.kind == .perspectiveEllipse || settings.rulerSettings.kind == .radial && ruler.selected != nil { return 0 }
+        return ruler.selectedFamily
+    }
+    @discardableResult
+    func cycleRulerAxis() -> Bool {
+        guard rulerActive, down else { return false }
+        return ruler.cycleAxis(at: location, input: stringLocation, settings: settings.rulerSettings)
     }
     private(set) var rawMappedLocation = CGPoint.zero
     var stringGuide: StringGuideSnapshot? {
-        guard posting, down, !overlayControlContact, stringLength > 0, settings.stringSettings.guideVisible else { return nil }
+        guard posting, down, stringLength > 0, settings.stringSettings.guideVisible else { return nil }
         return StringGuideSnapshot(input: rawMappedLocation, output: stringLocation, length: stringLength, displayBounds: displayBounds)
     }
     private var stringLength: Double {
@@ -71,7 +81,10 @@ final class PenOutput {
     var isContact: Bool { down }
     var outputPressure: Double { filteredPressure }
 
-    func events(for sample: PenSample, time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> [CGEvent] {
+    func events(for sample: PenSample, time: TimeInterval = ProcessInfo.processInfo.systemUptime, controlHeld: Bool = false) -> [CGEvent] {
+        defer { controlWasHeld = controlHeld }
+        if down, sample.inProximity, sample.pressure > contactThreshold, sample.toolID == toolID,
+           controlHeld, !controlWasHeld { _ = cycleRulerAxis() }
         var events: [CGEvent] = []
         let contact = sample.inProximity && sample.pressure > contactThreshold
         let mapped = sample.inProximity ? mappedLocation(for: sample) : nil
@@ -102,20 +115,16 @@ final class PenOutput {
             if let event = proximityEvent(entering: false, tool: toolID) { events.append(event) }
             proximity = false
         }
-        if !contact { string.reset(); ruler.reset(); overlayControlContact = false }
+        if !contact { string.reset(); ruler.reset(); rulerContactAnchor = nil }
         if let mapped {
             rawMappedLocation = mapped
             if contact {
                 if !down {
                     string.reset(); ruler.reset()
-                    overlayControlContact = overlayMenuTracking || overlayControlBounds.contains { $0.contains(mapped) }
                 }
-                if overlayControlContact {
-                    stringLocation = mapped; location = mapped
-                } else {
-                    stringLocation = string.process(mapped, length: stringLength)
-                    location = rulerActive ? ruler.process(stringLocation, settings: settings.rulerSettings) : stringLocation
-                }
+                stringLocation = string.process(mapped, length: stringLength)
+                if !down { rulerContactAnchor = stringLocation }
+                location = rulerActive ? ruler.process(stringLocation, settings: settings.rulerSettings) : stringLocation
             } else if !endingStroke || (stringLength == 0 && !rulerActive) {
                 location = mapped
             }
@@ -138,7 +147,9 @@ final class PenOutput {
     func recordDiscoveryDuration(_ seconds: Double) { timing.recordDiscoveryDuration(seconds) }
     func accept(_ sample: PenSample) {
         let arrival = ProcessInfo.processInfo.systemUptime
-        let generated = events(for: sample)
+        // Read native input metadata on the HID owner, independent of UI timer stalls.
+        let controlHeld = posting && rulerActive && settings.rulerSettings.accuracy > 0 && settings.rulerSettings.kind.supportsAxisCycling && sample.inProximity && CGEventSource.flagsState(.combinedSessionState).contains(.maskControl)
+        let generated = events(for: sample, controlHeld: controlHeld)
         if posting { generated.forEach { $0.post(tap: .cghidEventTap) } }
         timing.record(arrival: arrival, finished: ProcessInfo.processInfo.systemUptime,
                       inProximity: sample.inProximity, posted: posting ? generated.count : 0)

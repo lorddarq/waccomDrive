@@ -75,7 +75,8 @@ private struct StatusMenu: View {
             NSApp.activate(ignoringOtherApps: true)
         }
         Button(model.saved.rulerSettings.visible ? "Hide Ruler Guides" : "Show Ruler Guides") { model.toggleRulerGuide() }
-            .disabled(!model.saved.advancedFeaturesEnabled || !model.saved.rulerSettings.enabled || model.rulerEditing)
+            .disabled(!model.saved.advancedFeaturesEnabled || !model.saved.rulerSettings.enabled || model.rulerEditing || model.rulerPickerVisible)
+        Button("Choose Ruler…") { model.toggleRulerPicker() }.disabled(!model.running)
         Button(model.rulerEditing ? "Finish Editing Rulers" : "Edit Rulers on Screen") { model.toggleRulerEditing() }
             .disabled(!model.saved.advancedFeaturesEnabled || !model.saved.rulerSettings.enabled)
         Button(model.running ? "Pause Driver" : "Start Driver") { model.toggleDriver() }

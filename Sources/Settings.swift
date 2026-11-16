@@ -35,6 +35,11 @@ struct CustomKeyShortcut: Codable, Hashable {
     static let allowedModifiers = CGEventFlags([.maskCommand, .maskShift, .maskAlternate, .maskControl]).rawValue
     static func == (lhs: Self, rhs: Self) -> Bool { lhs.keyCode == rhs.keyCode && lhs.modifiers == rhs.modifiers }
     func hash(into hasher: inout Hasher) { hasher.combine(keyCode); hasher.combine(modifiers) }
+    func validate() throws {
+        guard keyCode <= 126, modifiers & ~Self.allowedModifiers == 0, !label.isEmpty, label.count <= 80 else {
+            throw SettingsError.invalid("Invalid custom keyboard shortcut.")
+        }
+    }
 }
 
 struct PressureCurve: Codable, Equatable {
@@ -288,6 +293,15 @@ struct DriverSettings: Codable, Equatable {
     // Profile payload is used in backups/imports; live profiles have individual JSON files.
     var pressureProfiles: [PressureProfile]?
     var customShortcuts: [String: CustomKeyShortcut]?
+    var rulerPickerShortcut: CustomKeyShortcut?
+    var rulerPickerShortcutDisabled: Bool?
+    var pickerShortcut: CustomKeyShortcut? {
+        get {
+            rulerPickerShortcutDisabled == true ? nil : (rulerPickerShortcut ?? CustomKeyShortcut(keyCode: 15,
+                modifiers: CGEventFlags([.maskControl, .maskAlternate]).rawValue, label: "⌃⌥R"))
+        }
+        set { rulerPickerShortcut = newValue; rulerPickerShortcutDisabled = newValue == nil }
+    }
     subscript(shortcut key: String) -> CustomKeyShortcut? {
         get { customShortcuts?[key] }
         set {
@@ -340,10 +354,17 @@ struct DriverSettings: Codable, Equatable {
         let bindings = [("pen", penButtons), ("tablet", tabletButtons)]
         let validKeys = Set(bindings.flatMap { prefix, actions in actions.indices.map { "\(prefix).\($0)" } })
         for (key, shortcut) in customShortcuts ?? [:] {
-            guard validKeys.contains(key), shortcut.keyCode <= 126,
-                  shortcut.modifiers & ~CustomKeyShortcut.allowedModifiers == 0,
-                  !shortcut.label.isEmpty, shortcut.label.count <= 80 else {
+            guard validKeys.contains(key) else {
                 throw SettingsError.invalid("Invalid custom keyboard shortcut.")
+            }
+            try shortcut.validate()
+        }
+        if let shortcut = rulerPickerShortcut {
+            try shortcut.validate()
+            let modifiers = CGEventFlags(rawValue: shortcut.modifiers)
+            guard !modifiers.intersection([.maskCommand, .maskAlternate, .maskControl]).isEmpty,
+                  ![51, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 115, 123, 124, 125, 126].contains(shortcut.keyCode) else {
+                throw SettingsError.invalid("Choose Control, Option or Command plus a non-navigation key for the ruler picker.")
             }
         }
         for (prefix, actions) in bindings {

@@ -2,15 +2,728 @@
 import Foundation
 import CoreGraphics
 
+func checkRulerPickerShortcut() throws {
+    var settings = DriverSettings()
+    let standard = settings.pickerShortcut!
+    assert(standard.keyCode == 15 && standard.modifiers == CGEventFlags([.maskControl, .maskAlternate]).rawValue)
+    try settings.validate()
+    settings.pickerShortcut = nil
+    let disabled = try JSONDecoder().decode(DriverSettings.self, from: JSONEncoder().encode(settings))
+    assert(disabled.pickerShortcut == nil, "Explicit shortcut clearing must survive restart")
+    settings.pickerShortcut = CustomKeyShortcut(keyCode: 15, modifiers: CGEventFlags.maskAlternate.rawValue, label: "Option-R")
+    let restored = try JSONDecoder().decode(DriverSettings.self, from: JSONEncoder().encode(settings))
+    assert(restored.pickerShortcut == settings.pickerShortcut && !restored.advancedFeaturesEnabled)
+    for shortcut in [CustomKeyShortcut(keyCode: 123, modifiers: standard.modifiers, label: "Arrow"),
+                     CustomKeyShortcut(keyCode: 15, modifiers: 0, label: "R"),
+                     CustomKeyShortcut(keyCode: 15, modifiers: CGEventFlags.maskShift.rawValue, label: "Shift-R"),
+                     CustomKeyShortcut(keyCode: 127, modifiers: standard.modifiers, label: "Invalid"),
+                     CustomKeyShortcut(keyCode: 15, modifiers: UInt64.max, label: "Invalid"),
+                     CustomKeyShortcut(keyCode: 15, modifiers: standard.modifiers, label: "")] {
+        settings.pickerShortcut = shortcut
+        do { try settings.validate(); assertionFailure("Invalid picker shortcut accepted") } catch {}
+    }
+    print("Ruler picker settings: default Control-Option-R, explicit disabled/custom JSON, master preservation and invalid-binding guards passed.")
+}
+
+func checkPriorityRulerPipeline() throws {
+    var variants: [RulerSettings] = []
+    for kind in RulerKind.allCases {
+        var ruler = RulerSettings(); ruler.kind = kind; ruler.enabled = true; ruler.accuracy = 1
+        ruler.changesAxesAutomatically = true
+        variants.append(ruler)
+        switch kind {
+        case .radial:
+            for bend in [-0.5, 0.5] { ruler.radialSettings.locked = false; ruler.radialSettings.bend = bend; variants.append(ruler) }
+        case .isometric, .perspective:
+            if kind == .perspective { ruler.camera = RulerCamera(); ruler.camera!.enableCustomAxes(true); ruler.camera!.worldAxesSettings[0].incline = 15 }
+            else { ruler.isometricAngles = [15, 150, 90] }
+            for learn in [false, true] { ruler.boxSettings.enabled = true; ruler.boxSettings.learnsDimensions = learn; variants.append(ruler) }
+        case .vanishing:
+            ruler.matchScene(true); ruler.fixedReference = RulerPoint(x: 700, y: 600)
+            ruler.familyMeasurements = Array(repeating: RulerMeasurements(visible: true, distance: 40, divisions: 4), count: 3)
+            variants.append(ruler)
+        case .perspectiveEllipse:
+            ruler.enableDepth(true); ruler.depthSettings.offset = 50; ruler.depthSettings.scale = 0.7
+            for mode in RulerEllipseMode.allCases { ruler.ellipseSizing = mode; variants.append(ruler) }
+        }
+    }
+    for ruler in variants.flatMap({ base in [0.0, 0.5, 1.0].map { accuracy in
+        var ruler = base; ruler.accuracy = accuracy; return ruler
+    } }) {
+        try ruler.validate()
+        let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(ruler))
+        assert(restored == ruler, "Priority construction settings must survive JSON round trips")
+        var settings = DriverSettings(); settings.advancedFeaturesEnabled = true; settings.rulerSettings = ruler
+        settings.advancedPressureCurve = EditablePressureCurve(); settings.processingSettings.enabled = true
+        settings.stringSettings.enabled = true; settings.stringSettings.length = 15
+        settings.speedSettings.enabled = true; settings.speedSettings.slowGain = 0.5; settings.speedSettings.fastGain = 1.5
+        let output = PenOutput(); output.settings = settings
+        settings.rulerSettings.enabled = false
+        let baseline = PenOutput(); baseline.settings = settings
+        for i in 0..<160 {
+            let sample = PenSample(x: 24000 + Int(8000 * cos(Double(i) / 15)), y: 16000 + Int(6000 * sin(Double(i) / 15)),
+                pressure: 300 + i * 7, tiltX: i % 60 - 30, tiltY: 20 - i % 40, inProximity: true, toolID: i < 80 ? 1 : 2, buttons: i % 4)
+            let time = 1 + Double(i) / 200, control = i % 25 == 0
+            let actual = output.events(for: sample, time: time, controlHeld: control)
+            let expected = baseline.events(for: sample, time: time, controlHeld: control)
+            assert(actual.map(\.type) == expected.map(\.type), "Ruler must preserve event lifecycle across tool changes")
+            assert(output.currentSpeed == baseline.currentSpeed && output.currentSpeedGain == baseline.currentSpeedGain && output.outputPressure == baseline.outputPressure)
+            for (a, b) in zip(actual, expected) {
+                if ruler.accuracy == 0 { assert(a.location == b.location, "Zero accuracy must exactly bypass ruler position processing") }
+                assert(a.flags == b.flags)
+                for field in [CGEventField.tabletEventPointPressure, .tabletEventTiltX, .tabletEventTiltY] { assert(a.getDoubleValueField(field) == b.getDoubleValueField(field)) }
+                for field in [CGEventField.tabletEventPointX, .tabletEventPointY, .tabletEventPointButtons, .tabletProximityEventPointerType] { assert(a.getIntegerValueField(field) == b.getIntegerValueField(field)) }
+            }
+        }
+        let last = output.outputLocation
+        let release = output.events(for: PenSample(), time: 2)
+        assert(release.map(\.type) == [.leftMouseUp, .tabletProximity])
+        assert(release[0].location == last && release[0].getDoubleValueField(.tabletEventPointPressure) == 0)
+        assert(!output.isContact && output.currentSpeed == 0 && output.outputPressure == 0)
+        assert(output.events(for: PenSample(), time: 2.005).isEmpty, "Lift must not produce a tail")
+        output.settings.advancedFeaturesEnabled = false
+        let raw = PenSample(x: 20000, y: 10000, pressure: 1000, inProximity: true, toolID: 1)
+        assert(output.events(for: raw, time: 3).last!.location == output.mappedLocation(for: raw), "Master-off must bypass every ruler mode")
+        settings.rulerSettings = ruler; settings.penButtons = [.shift, .rightClick]
+        for cleanup in 0..<4 {
+            let session = TabletSession(logging: false); session.configure(settings)
+            _ = session.buttons.pen(3)
+            session.output.flags = session.buttons.flags; session.output.heldMouse = session.buttons.heldMouse
+            _ = session.output.events(for: raw, time: 1)
+            assert(session.output.isContact && session.buttons.flags.contains(.maskShift) && session.buttons.heldMouse == .right)
+            switch cleanup {
+            case 0:
+                var changed = settings; changed.advancedFeaturesEnabled = false
+                session.configure(changed)
+                assert(session.processingChangePending && session.output.settings.advancedFeaturesEnabled)
+                session.resetPen()
+                assert(!session.processingChangePending && !session.output.settings.advancedFeaturesEnabled)
+            case 1: session.reset()
+            case 2: session.setPosting(false)
+            default: session.stop()
+            }
+            assert(!session.output.isContact && session.output.outputPressure == 0 && session.output.currentSpeed == 0)
+            assert(session.buttons.flags.isEmpty && session.buttons.heldMouse == nil && session.buttons.releaseAll().isEmpty)
+            let fresh = PenOutput(); fresh.settings = session.output.settings
+            let actual = session.output.events(for: raw, time: 3), expected = fresh.events(for: raw, time: 3)
+            assert(actual.map(\.type) == expected.map(\.type) && actual.last!.location == expected.last!.location)
+            assert(session.output.outputPressure == fresh.outputPressure, "Cleanup must clear positional and pressure history")
+            session.stop()
+        }
+    }
+    print("Priority pipeline: all family variants at 0/50/100% accuracy round-trip settings and preserve event types, speed, pressure/tilt/buttons/tool changes; no-tail lift, master bypass, deferred configuration and held-modifier/mouse cleanup through reset/pause/stop passed. No events posted.")
+}
+
+func checkVanishingMeasurements() throws {
+    var settings = RulerSettings(); settings.kind = .vanishing; settings.enabled = true
+    settings.vanishingPoints = [RulerPoint(x: 1000, y: 0), RulerPoint(x: 0, y: 1000)]
+    settings.fixedReference = RulerPoint(x: 0, y: 0)
+    settings.measureSettings = RulerMeasurements(visible: true, distance: 100, divisions: 2)
+    settings.familyMeasurements = [settings.measureSettings, RulerMeasurements(visible: true, distance: 40, divisions: 4)]
+    try settings.validate()
+    let ticks = RulerGeometry.ticks(settings, anchor: .zero, family: 0)
+    for unit in [0.5, 1.0, 2.0, 5.0, -1.0, -5.0] {
+        // Independent pinhole scene: world (x,z)=(n,9+n), focal length 1000.
+        let expected = 1000 * unit / (9 + unit)
+        assert(ticks.contains { abs($0.point.x - expected) < 1e-8 && abs($0.point.y) < 1e-8 && $0.major == (unit.rounded() == unit) })
+    }
+    assert(ticks.allSatisfy { $0.point.x < 1000 && $0.point.x.isFinite }, "No reflected ticks beyond the depth pole")
+    let calibrated = settings.editing(.familyMeasure(0), delta: CGPoint(x: 50, y: 100))!
+    assert(calibrated.measurement(for: 0).distance == 150 && calibrated.measurement(for: 1).distance == 40)
+    let horizon = RulerGeometry.horizon(settings)!
+    assert(abs(horizon.origin.x + horizon.origin.y - 1000) < 1e-8)
+    let constrained = settings.editing(.vanishing(0), delta: CGPoint(x: 0, y: 100), snap: true)!
+    assert(abs(constrained.vanishingPoints[0].x - 950) < 1e-8 && abs(constrained.vanishingPoints[0].y - 50) < 1e-8)
+    let aligned = settings.editing(.vanishing(0), delta: CGPoint(x: -998, y: 3), screenSpace: true)!
+    assert(aligned.vanishingPoints[0] == RulerPoint(x: 0, y: 3))
+    settings.matchScene(true)
+    let original = settings.sceneLines![0]
+    let translated = settings.editing(.scenePoint(0, 0), delta: CGPoint(x: 25, y: -12), snap: true)!
+    for i in 0..<2 { assert(translated.sceneLines![0][i] == RulerPoint(x: original[i].x + 25, y: original[i].y - 12)) }
+    assert(translated.sceneLines![0][2...] == original[2...])
+    let pair = [RulerPoint(x: 0, y: 0), RulerPoint(x: 100, y: 20), RulerPoint(x: 0, y: 100), RulerPoint(x: 100, y: 100)]
+    let horizontal = RulerGeometry.editSceneLine(pair, index: 1, delta: CGPoint(x: 0, y: -18), translate: false, align: true)!
+    assert(horizontal[1] == RulerPoint(x: 100, y: 0))
+    settings.sceneLines = [RulerGeometry.sceneLines(toward: SIMD3(1, 0, 0), center: .zero), RulerGeometry.sceneLines(toward: SIMD3(0, 1, 0), center: .zero)]
+    assert(RulerGeometry.horizon(settings) == nil)
+    let parallel = RulerGeometry.ticks(settings, anchor: .zero, family: 1)
+    assert(parallel.contains { abs($0.point.y - 40) < 1e-8 && abs($0.point.x) < 1e-8 && $0.major })
+    settings.measureSettings.visible = false
+    assert(RulerGeometry.ticks(settings, anchor: .zero, family: 1).isEmpty)
+    settings.measureSettings.visible = true
+    let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
+    assert(restored == settings)
+    settings.sceneLines = nil; settings.familyMeasurements = nil
+    assert(RulerGeometry.ticks(settings, anchor: .zero, family: 0).contains { abs($0.point.x - 200) < 1e-8 }, "Absent calibration must preserve legacy screen ticks")
+    settings.familyMeasurements = [RulerMeasurements(visible: true, distance: .nan, divisions: 2)]
+    do { try settings.validate(); assertionFailure("Invalid calibration accepted") } catch {}
+    settings.familyMeasurements = [RulerMeasurements(visible: true, distance: 1000, divisions: 2)]
+    assert(RulerGeometry.ticks(settings, anchor: .zero, family: 0).isEmpty, "Unit at VP must not reflect or explode")
+    print("Vanishing measurements: independent projective-depth oracle, per-family subdivisions, infinite directions, legacy ticks, horizon constraints, pair translation/alignment, calibration isolation and JSON passed.")
+}
+
+func checkEllipseDepth() throws {
+    var settings = RulerSettings(); settings.kind = .perspectiveEllipse; settings.enabled = true; settings.accuracy = 1
+    let center = SIMD3(50.0, 40, 1400), a = SIMD3(200.0, 0, 100), b = SIMD3(0.0, 160, 50), direction = SIMD3(0.4, -0.7, 1.0)
+    let focal = 900.0
+    func project(_ p: SIMD3<Double>) -> CGPoint { CGPoint(x: 700 + focal * p.x / p.z, y: 450 + focal * p.y / p.z) }
+    let corners = [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)]
+    settings.corners = corners.map { let p = project(center + a * ($0.x - 0.5) + b * ($0.y - 0.5)); return RulerPoint(x: p.x, y: p.y) }
+    settings.depthSettings.vanishingPoint = RulerPoint(x: 700 + focal * direction.x, y: 450 + focal * direction.y)
+    settings.enableDepth(true); settings.depthSettings.offset = 75
+    let worldDistance = settings.depthSettings.offset * center.z / (focal * hypot(direction.x - center.x / center.z, direction.y - center.y / center.z))
+    for unit in corners + [CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0.25, y: 0.75)] {
+        let expected = project(center + a * (unit.x - 0.5) + b * (unit.y - 0.5) + direction * worldDistance)
+        let actual = settings.sectionPoint(unit, offset: 75)!
+        assert(hypot(expected.x - actual.x, expected.y - actual.y) < 1e-8, "Depth sections must match independent 3D projection")
+    }
+    try settings.validate()
+    let start = settings.editingCenter, moved = settings.editing(.ellipseDepth, delta: CGPoint(x: 20, y: -30))!
+    let expectedLine = RulerGeometry.line(CGPoint(x: start.x + 20, y: start.y - 30), origin: start,
+        direction: CGPoint(x: settings.depthSettings.vanishingPoint.x - start.x, y: settings.depthSettings.vanishingPoint.y - start.y))
+    // Handle uses the strongest component to preserve the cursor's progress along the axis.
+    assert(hypot(moved.editingCenter.x - start.x, moved.editingCenter.y - start.y) > 1 && expectedLine.x.isFinite)
+    let baked = settings.editing(.move, delta: CGPoint(x: 10, y: 5))!
+    assert(baked.depthSettings.offset == 0 && baked.corners != settings.corners)
+    let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
+    assert(restored == settings)
+    settings.matchDepthScene(true)
+    let paired = settings.depthVector!, direct = restored.depthVector!
+    assert(sqrt((paired - direct).x * (paired - direct).x + (paired - direct).y * (paired - direct).y + (paired - direct).z * (paired - direct).z) < 1e-7)
+    // An affine reference plane with a third direction at infinity gives parallel cylinder sides.
+    settings.corners = [RulerPoint(x: 0, y: 0), RulerPoint(x: 100, y: 0), RulerPoint(x: 100, y: 100), RulerPoint(x: 0, y: 100)]
+    settings.depthSettings.sceneLines = RulerGeometry.sceneLines(toward: SIMD3(1, 0, 0), center: CGPoint(x: 50, y: 50))
+    // A direction in the reference plane cannot define 3D depth, even at infinity.
+    assert(settings.depthVector == nil)
+    do { try settings.validate(); assertionFailure("In-plane depth accepted") } catch {}
+    // Tilt the plane: a finite horizontal depth ray then has visible cylinder/cone tangents.
+    settings.corners = [RulerPoint(x: 0, y: 0), RulerPoint(x: 120, y: 10), RulerPoint(x: 100, y: 100), RulerPoint(x: 20, y: 90)]
+    settings.depthSettings.sceneLines = RulerGeometry.sceneLines(toward: SIMD3(1, 0, 0), center: CGPoint(x: 60, y: 50))
+    settings.depthSettings.offset = 100
+    try settings.validate()
+    for scale in [0.6, 1.0, 1.4] {
+        settings.depthSettings.scale = scale
+        let tangents = settings.depthTangents(radius: settings.sectionRadius)
+        assert(tangents.count == 2, "Visible cylinder/cone must have two tangents")
+        for (base, top) in tangents {
+            for (point, quad, radius) in [(base, settings.corners, settings.circleRadius), (top, settings.sectionCorners, settings.sectionRadius)] {
+                let plane = RulerPlane(quad)!, unit = plane.unit(point)!
+                assert(abs(hypot(unit.x - 0.5, unit.y - 0.5) - radius / 2) < 1e-7)
+                let angle = atan2(unit.y - 0.5, unit.x - 0.5), epsilon = 1e-5
+                let before = plane.screen(CGPoint(x: 0.5 + radius / 2 * cos(angle - epsilon), y: 0.5 + radius / 2 * sin(angle - epsilon)))!
+                let after = plane.screen(CGPoint(x: 0.5 + radius / 2 * cos(angle + epsilon), y: 0.5 + radius / 2 * sin(angle + epsilon)))!
+                let dx = top.x - base.x, dy = top.y - base.y, tx = after.x - before.x, ty = after.y - before.y
+                assert(abs(dx * ty - dy * tx) / (hypot(dx, dy) * hypot(tx, ty)) < 1e-6, "Generator must be tangent to both projected circles")
+            }
+        }
+    }
+    var projection = RulerProjection(); projection.configure(settings)
+    let curve = RulerGeometry.projectedCircle(settings.sectionCorners, radius: settings.sectionRadius)!
+    let point = curve[100], output = projection.process(point, settings: settings)
+    assert(hypot(output.x - point.x, output.y - point.y) < 1e-8)
+    projection.reset(); settings.accuracy = 0.5
+    let raw = CGPoint(x: point.x + 8, y: point.y - 6), closest = RulerGeometry.nearest(raw, on: curve)
+    let blended = projection.process(raw, settings: settings)
+    assert(hypot(blended.x - (raw.x + closest.x) / 2, blended.y - (raw.y + closest.y) / 2) < 1e-8)
+    projection.reset(); settings.accuracy = 0
+    assert(projection.process(CGPoint(x: 30, y: 80), settings: settings) == CGPoint(x: 30, y: 80))
+    settings.depthSettings.sceneLines = [RulerPoint(x: 0, y: 0)]
+    do { try settings.validate(); assertionFailure("Malformed depth lines accepted") } catch {}
+    settings = RulerSettings(); settings.kind = .perspectiveEllipse; settings.enableDepth(true)
+    settings.depthSettings.vanishingPoint = RulerPoint(x: settings.editingCenter.x, y: settings.editingCenter.y)
+    settings.depthSettings.sceneLines = nil
+    assert(settings.editing(.ellipseDepth, delta: CGPoint(x: 20, y: 0))?.depthSettings.offset == 20, "Axial view must still allow depth scaling")
+    assert(settings.editing(.ellipseDepth, delta: CGPoint(x: 34, y: 0), snap: true)?.depthSettings.offset == 25)
+    assert(settings.editing(.ellipseDepth, delta: .zero)?.depthSettings.offset == 25)
+    assert(settings.editing(.ellipseDepth, delta: .zero, snap: true)?.depthSettings.offset == -25)
+    settings.enableDepth(false)
+    settings.corners = [RulerPoint(x: 0, y: 0), RulerPoint(x: 100, y: 0), RulerPoint(x: 100, y: 100), RulerPoint(x: 0, y: 100)]
+    let translated = settings.editing(.move, delta: CGPoint(x: 34, y: 18), snap: true)!
+    assert(translated.corners[0] == RulerPoint(x: 25, y: 25))
+    let symmetric = settings.editing(.edge(1), delta: CGPoint(x: 24, y: 0), snap: true)!
+    assert(symmetric.corners[0].x == -25 && symmetric.corners[1].x == 125)
+    let resized = settings.editing(.corner(2), delta: CGPoint(x: 26, y: 26), snap: true)!
+    assert(resized.corners[0] == RulerPoint(x: -25, y: -25) && resized.corners[2] == RulerPoint(x: 125, y: 125))
+    let constrained = settings.editing(.corner(0), delta: CGPoint(x: -10, y: -30), screenSpace: true)!
+    assert(constrained.corners[0] == RulerPoint(x: 0, y: -30))
+    settings.ellipsePlaneStep = .nan
+    do { try settings.validate(); assertionFailure("Invalid plane step accepted") } catch {}
+    print("Ellipse depth: independent 3D section oracle, finite/infinite scene matching, in-plane guards, cylinder/cone double-tangent oracle, snapping/bypass, baking, axial scaling and JSON passed.")
+}
+
+func checkCameraInclinesAndPlanes() throws {
+    func length(_ v: SIMD3<Double>) -> Double { sqrt(v.x * v.x + v.y * v.y + v.z * v.z) }
+    func dot(_ a: SIMD3<Double>, _ b: SIMD3<Double>) -> Double { a.x * b.x + a.y * b.y + a.z * b.z }
+    var camera = RulerCamera()
+    let baseline = camera.axes
+    camera.enableCustomAxes(true)
+    assert(zip(camera.axes, baseline).allSatisfy { length($0 - $1) < 1e-12 })
+    camera.worldAxesSettings[0].incline = 15
+    assert(length(camera.axes[0] - baseline[0]) > 0.1 && length(camera.axes[1] - baseline[1]) < 1e-12 && length(camera.axes[2] - baseline[2]) < 1e-12)
+    let before = camera.axes
+    camera.yaw += 30
+    for i in 0..<3 { assert(abs(length(camera.axes[i]) - 1) < 1e-12) }
+    assert(abs(dot(camera.axes[0], camera.axes[1]) - dot(before[0], before[1])) < 1e-12)
+    var settings = RulerSettings(); settings.kind = .perspective; settings.camera = camera
+    settings.fixedReference = RulerPoint(x: 400, y: 300)
+    for plane in RulerCameraPlane.allCases {
+        settings.circlePlane = plane
+        let ellipse = settings.cameraEllipse()!
+        try ellipse.validate()
+        assert(ellipse.kind == .perspectiveEllipse && ellipse.camera == settings.camera && ellipse.circleRadius == 1)
+        assert(hypot(ellipse.editingCenter.x - 400, ellipse.editingCenter.y - 300) < 1e-8)
+        let pair = plane.axes, a = camera.axes[pair.0], b = camera.axes[pair.1]
+        let normal = SIMD3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x)
+        let origin = SIMD3(400 - settings.centerX, 300 - settings.centerY, camera.focalLength)
+        let curve = RulerGeometry.projectedCircle(ellipse.corners)!
+        for index in stride(from: 0, through: 512, by: 32) {
+            let point = curve[index], ray = SIMD3((point.x - settings.centerX) / camera.focalLength, (point.y - settings.centerY) / camera.focalLength, 1)
+            let world = ray * (dot(normal, origin) / dot(normal, ray)) - origin
+            assert(abs(length(world) - settings.circleDiameter / 2) < 1e-7, "Projected helper must be a true world-plane circle even with non-orthogonal custom axes")
+        }
+    }
+    let payload = try JSONEncoder().encode(settings)
+    let restored = try JSONDecoder().decode(RulerSettings.self, from: payload)
+    assert(restored == settings)
+    settings.fixedReference = nil
+    settings.camera!.points = 1; settings.camera!.customAxes = nil; settings.circlePlane = .xz
+    assert(settings.cameraEllipse() == nil, "Edge-on circle planes must be rejected")
+    settings.camera = camera; settings.circleDiameter = 10000
+    assert(settings.cameraEllipse() == nil, "Circle planes crossing the camera must be rejected")
+    camera.points = 1; camera.yaw = 45; camera.pitch = 20; camera.customAxes = nil
+    let onePoint = camera.axes
+    camera.enableCustomAxes(true)
+    assert(camera.points == 3 && zip(camera.axes, onePoint).allSatisfy { length($0 - $1) < 1e-12 }, "Enabling inclines must preserve the current base view")
+    camera.worldAxesSettings[1].incline = 91
+    do { try camera.validate(); assertionFailure("Invalid axis incline accepted") } catch {}
+    print("Camera inclines/planes: independent 3D axes, preserved base views, shared projection, true-circle ray/plane oracle, pinned origins, edge-on/near-plane guards and JSON passed.")
+}
+
+func checkAutomaticRulerAxes() throws {
+    var settings = RulerSettings()
+    settings.enabled = true; settings.kind = .isometric; settings.axisAngles = [0, 90, 45]
+    settings.accuracy = 1; settings.family = 1; settings.changesAxesAutomatically = true
+    var projection = RulerProjection(); projection.configure(settings)
+    _ = projection.process(.zero, settings: settings)
+    for x in stride(from: 4.0, through: 40, by: 4) { _ = projection.process(CGPoint(x: x, y: 0), settings: settings) }
+    for y in 1...20 { _ = projection.process(CGPoint(x: 40, y: y), settings: settings) }
+    assert(projection.selectedFamily == 1)
+    assert(projection.process(CGPoint(x: 40, y: 24), settings: settings) == CGPoint(x: 40, y: 24))
+    for x in 41...64 { _ = projection.process(CGPoint(x: x, y: 24), settings: settings) }
+    assert(projection.selectedFamily == 0)
+    assert(projection.process(CGPoint(x: 68, y: 24), settings: settings) == CGPoint(x: 68, y: 24))
+    projection.reset(); _ = projection.process(.zero, settings: settings)
+    for x in 1...100 {
+        _ = projection.process(CGPoint(x: Double(x), y: sin(Double(x)) * 0.4), settings: settings)
+        assert(projection.selectedFamily == 0, "Small oscillations must not change axis")
+    }
+    let held = projection.process(CGPoint(x: 100, y: 0), settings: settings)
+    for _ in 0..<20 { assert(projection.process(CGPoint(x: 100, y: 0), settings: settings) == held) }
+    settings.changesAxesAutomatically = false
+    projection.configure(settings); _ = projection.process(.zero, settings: settings)
+    _ = projection.process(CGPoint(x: 40, y: 0), settings: settings)
+    for y in 1...30 { _ = projection.process(CGPoint(x: 40, y: y), settings: settings) }
+    assert(projection.selectedFamily == 0, "Default/manual mode must retain the locked axis")
+    settings.changesAxesAutomatically = true; settings.axisAngles = [0, 0.5, 90]
+    projection.configure(settings); _ = projection.process(.zero, settings: settings)
+    for x in 1...100 { _ = projection.process(CGPoint(x: Double(x), y: Double(x) * tan(0.5 * .pi / 180)), settings: settings) }
+    assert(projection.selectedFamily == 0, "Ambiguous nearly parallel movement must not chatter")
+    for kind in [RulerKind.isometric, .perspective] {
+        settings.kind = kind; settings.axisAngles = [0, 90, 45]; settings.camera = kind == .perspective ? RulerCamera() : nil
+        settings.boxSettings.enabled = true; settings.boxSettings.learnsDimensions = true
+        let origin = kind == .perspective ? settings.center : CGPoint.zero
+        projection.configure(settings); _ = projection.process(origin, settings: settings)
+        var last = origin
+        let legs = [(SIMD3(0.0, 0, 0), SIMD3(80.0, 0, 0)), (SIMD3(80.0, 0, 0), SIMD3(80.0, 60, 0)),
+                    (SIMD3(80.0, 60, 0), SIMD3(80.0, 60, 40)), (SIMD3(80.0, 60, 40), SIMD3(40.0, 60, 40))]
+        for (start, end) in legs {
+            for step in 1...20 {
+                let world = start + (end - start) * Double(step) / 20
+                last = projection.process(RulerGeometry.projectWorld(settings, anchor: origin, world: world)!, settings: settings)
+            }
+        }
+        let extents = projection.guideSettings(settings).boxSettings.extents
+        assert(zip(extents, [80.0, 60, 40]).allSatisfy { abs($0 - $1) < 1e-6 }, "Automatic learning must capture the original turn corner, not drift during acquisition")
+        let expected = RulerGeometry.projectWorld(settings, anchor: origin, world: SIMD3(40, 60, 40))!
+        assert(hypot(last.x - expected.x, last.y - expected.y) < 1e-6)
+        projection.reset(); assert(projection.guideSettings(settings) == settings)
+    }
+    let roundTrip = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
+    assert(roundTrip == settings)
+    assert(RulerSettings().changesAxesAutomatically == false)
+    print("Automatic axes: clear turns, stationary/noisy/near-parallel hysteresis, opt-in bypass, original-corner learned boxes for camera/isometric, reset and JSON passed.")
+}
+
+func checkLearnedRulerBoxes() throws {
+    for kind in [RulerKind.isometric, .perspective] {
+        for accuracy in [0.5, 1.0] {
+            var settings = RulerSettings()
+            settings.kind = kind; settings.enabled = true; settings.accuracy = accuracy; settings.family = 1
+            settings.axisAngles = [0, 90, 45]; settings.camera = kind == .perspective ? RulerCamera() : nil
+            settings.boxSettings.enabled = true; settings.boxSettings.learnsDimensions = true
+            let origin = kind == .perspective ? settings.center : CGPoint.zero
+            var projection = RulerProjection(); projection.configure(settings)
+            _ = projection.process(origin, settings: settings)
+            for (i, world) in [SIMD3(80.0, 0, 0), SIMD3(80, 60, 0), SIMD3(80, 60, 40)].enumerated() {
+                let point = RulerGeometry.projectWorld(settings, anchor: origin, world: world)!
+                let output = projection.process(point, settings: settings)
+                assert(hypot(output.x - point.x, output.y - point.y) < 1e-7)
+                assert(projection.cycleAxis(at: output, input: point, settings: settings))
+                let stationary = projection.process(point, settings: settings)
+                assert(hypot(stationary.x - output.x, stationary.y - output.y) < 1e-7, "Learning/cycling must preserve stationary output")
+                assert(abs(projection.guideSettings(settings).boxSettings.extents[i] - [80.0, 60, 40][i]) < 1e-7)
+            }
+            let learned = projection.guideSettings(settings).boxSettings.extents
+            assert(zip(learned, [80.0, 60, 40]).allSatisfy { abs($0 - $1) < 1e-7 })
+            assert(settings.boxSettings.extents == [100, 100, 100], "Per-stroke learning must never overwrite saved explicit extents")
+            let outside = RulerGeometry.projectWorld(settings, anchor: origin, world: SIMD3(-20, 60, 40))!
+            let corner = RulerGeometry.projectWorld(settings, anchor: origin, world: SIMD3(0, 60, 40))!
+            let bounded = projection.process(outside, settings: settings)
+            let blended = CGPoint(x: outside.x + (corner.x - outside.x) * accuracy, y: outside.y + (corner.y - outside.y) * accuracy)
+            assert(hypot(bounded.x - blended.x, bounded.y - blended.y) < 1e-7, "Completed learned box must clamp to learned dimensions")
+            projection.reset()
+            assert(projection.guideSettings(settings) == settings)
+            _ = projection.process(origin, settings: settings)
+            assert(projection.guideSettings(settings).boxSettings.extents == [100, 100, 100])
+            let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
+            assert(restored == settings)
+            // Partial-accuracy first-axis error must not jump when captured.
+            projection.reset()
+            _ = projection.process(origin, settings: settings)
+            let point = RulerGeometry.projectWorld(settings, anchor: origin, world: SIMD3(80, 0, 0))!
+            let direction = RulerGeometry.directions(settings, anchor: origin)[0], length = hypot(direction.x, direction.y)
+            let offAxis = CGPoint(x: point.x - direction.y / length * 10, y: point.y + direction.x / length * 10)
+            let output = projection.process(offAxis, settings: settings)
+            assert(projection.cycleAxis(at: output, input: offAxis, settings: settings))
+            let stationary = projection.process(offAxis, settings: settings)
+            assert(hypot(output.x - stationary.x, output.y - stationary.y) < 1e-7)
+        }
+    }
+    let oldBox = try JSONDecoder().decode(RulerBoxSettings.self, from: Data("{\"enabled\":true,\"extents\":[100,100,100]}".utf8))
+    assert(!oldBox.learnsDimensions, "Older explicit boxes must retain their behavior")
+    print("Learned boxes: camera/isometric capture, partial/full continuity, learned bounds, saved-size preservation, lift/reset and legacy JSON passed.")
+}
+
+func checkRulerAxisAndReference() throws {
+    var settings = RulerSettings()
+    settings.enabled = true; settings.kind = .isometric; settings.axisAngles = [0, 90, 45]; settings.family = 1
+    for accuracy in [0.5, 1.0] {
+        settings.accuracy = accuracy
+        var projection = RulerProjection(); projection.configure(settings)
+        _ = projection.process(CGPoint(x: 20, y: 20), settings: settings)
+        let input = CGPoint(x: 40, y: 30), delivered = projection.process(input, settings: settings)
+        assert(projection.cycleAxis(at: delivered, input: input, settings: settings))
+        assert(projection.selectedFamily == 1)
+        let stationary = projection.process(input, settings: settings)
+        assert(hypot(stationary.x - delivered.x, stationary.y - delivered.y) < 1e-8, "Axis switch must not jump at partial or full accuracy")
+        let next = projection.process(CGPoint(x: 40, y: 40), settings: settings)
+        assert(abs(next.x - stationary.x) < 1e-8 && abs(next.y - stationary.y - 10) < 1e-8)
+        projection.reset()
+        _ = projection.process(input, settings: settings)
+        assert(projection.selectedFamily == 0, "Per-stroke axis changes must not replace the saved starting family")
+    }
+    settings.accuracy = 0
+    var bypass = RulerProjection(); bypass.configure(settings)
+    assert(!bypass.cycleAxis(at: .zero, input: .zero, settings: settings))
+    settings.accuracy = 1; settings.axisAngles = [0, 180, 0]
+    _ = bypass.process(.zero, settings: settings)
+    assert(!bypass.cycleAxis(at: .zero, input: .zero, settings: settings), "Cycling must not select a duplicate parallel family")
+    settings.axisAngles = [0, 90, 45]
+    let origin = CGPoint(x: 100, y: 200)
+    let pinned = settings.editing(.reference, delta: .zero, referenceOrigin: origin)!
+    assert(pinned.fixedReference?.cg == origin)
+    let moved = pinned.editing(.reference, delta: CGPoint(x: 20, y: -30))!
+    assert(moved.fixedReference?.cg == CGPoint(x: 120, y: 170))
+    assert(moved.editing(.reference, delta: .zero)!.fixedReference == nil)
+    let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(moved))
+    assert(restored == moved)
+    var invalid = moved; invalid.fixedReference = RulerPoint(x: .nan, y: 0)
+    do { try invalid.validate(); assertionFailure("Invalid fixed reference accepted") } catch {}
+    let output = PenOutput()
+    var driver = DriverSettings(); driver.advancedFeaturesEnabled = true; driver.ruler = settings
+    output.settings = driver
+    var sample = PenSample(); sample.inProximity = true; sample.pressure = 1000; sample.x = 4000; sample.y = 5000
+    _ = output.events(for: sample, time: 1)
+    sample.x += 500; sample.y += 200
+    _ = output.events(for: sample, time: 1.01)
+    let before = output.outputLocation, pressure = output.outputPressure
+    let changed = output.events(for: sample, time: 1.02, controlHeld: true)
+    assert(hypot(output.outputLocation.x - before.x, output.outputLocation.y - before.y) < 1e-8)
+    assert(changed.count == 1 && changed[0].type == .leftMouseDragged && output.outputPressure == pressure)
+    let family = output.rulerGuideFamily
+    _ = output.events(for: sample, time: 1.03, controlHeld: true)
+    assert(output.rulerGuideFamily == family, "Holding Control must not repeatedly cycle")
+    _ = output.events(for: sample, time: 1.04)
+    _ = output.events(for: sample, time: 1.05, controlHeld: true)
+    assert(output.rulerGuideFamily != family)
+    sample.pressure = 0
+    let release = output.events(for: sample, time: 1.06, controlHeld: true).first { $0.type == .leftMouseUp }!
+    assert(!output.isContact && release.getDoubleValueField(.tabletEventPointPressure) == 0 && !output.cycleRulerAxis())
+    print("Ruler axis/reference: continuous partial/full-accuracy changes, one change per Control press, saved family retention, degenerate/bypass guards, pin/move/unpin, validation/JSON and immediate lift passed.")
+}
+
+func checkRulerBoxes() throws {
+    var settings = RulerSettings()
+    settings.kind = .isometric; settings.axisAngles = [0, 90, 45]; settings.boxSettings.enabled = true
+    settings.enabled = true; settings.accuracy = 1
+    let vertices = RulerGeometry.boxVertices(settings, anchor: .zero)!
+    assert(vertices.count == 8 && RulerGeometry.boxEdges.count == 12 && vertices[1] == CGPoint(x: 100, y: 0))
+    assert(abs(vertices[2].x) < 1e-9 && vertices[2].y == 100)
+    var projection = RulerProjection(); projection.configure(settings)
+    assert(projection.process(.zero, settings: settings) == .zero)
+    _ = projection.process(CGPoint(x: 10, y: 0), settings: settings)
+    assert(projection.process(CGPoint(x: 15, y: 0), settings: settings) == CGPoint(x: 15, y: 0))
+    assert(projection.process(CGPoint(x: 50, y: 50), settings: settings) == CGPoint(x: 50, y: 0), "Active edge must not jump across projected intersections")
+    assert(projection.process(CGPoint(x: 120, y: 0), settings: settings) == CGPoint(x: 100, y: 0), "Box corner must stop overshoot")
+    _ = projection.process(CGPoint(x: 100, y: 10), settings: settings)
+    let alongY = projection.process(CGPoint(x: 100, y: 15), settings: settings)
+    assert(hypot(alongY.x - 100, alongY.y - 15) < 1e-8 && projection.selectedFamily == 1)
+    let corner = projection.process(CGPoint(x: 100, y: 120), settings: settings)
+    assert(hypot(corner.x - 100, corner.y - 100) < 1e-8)
+    projection.reset()
+    let next = CGPoint(x: 300, y: 300)
+    assert(projection.process(next, settings: settings) == next)
+    settings.family = 1
+    for accuracy in [0.0, 0.5, 1.0] {
+        settings.accuracy = accuracy
+        projection.configure(settings)
+        _ = projection.process(.zero, settings: settings)
+        let result = projection.process(CGPoint(x: 120, y: 0), settings: settings)
+        assert(abs(result.x - (120 - 20 * accuracy)) < 1e-8 && result.y == 0)
+    }
+    settings.kind = .perspective; settings.camera = RulerCamera(); settings.accuracy = 1
+    let cameraVertices = RulerGeometry.boxVertices(settings, anchor: settings.center)!
+    for edge in RulerGeometry.boxEdges {
+        let a = cameraVertices[edge.from], b = cameraVertices[edge.to]
+        let direction = settings.camera!.directions(center: settings.center, anchor: a)[edge.family]
+        assert(abs((b.x - a.x) * direction.y - (b.y - a.y) * direction.x) < 1e-7, "Box edges and camera guides must share vanishing directions")
+    }
+    let handle = settings.editHandles.first { $0.id == .boxSize(0) }!.point
+    let edited = settings.editing(.boxSize(0), delta: CGPoint(x: (handle.x - settings.centerX) * 0.1, y: (handle.y - settings.centerY) * 0.1))!
+    assert(edited.boxSettings.extents[0] > 100 && edited.boxSettings.extents[1] == 100)
+    settings.camera!.viewRadius = 20; settings.boxSettings.extents = [-10000, 10000, 10000]
+    assert(RulerGeometry.boxVertices(settings, anchor: settings.center) == nil)
+    projection.configure(settings)
+    _ = projection.process(settings.center, settings: settings)
+    let raw = CGPoint(x: settings.centerX + 20, y: settings.centerY + 30)
+    assert(projection.process(raw, settings: settings) == raw, "Near-plane crossing must bypass invalid box geometry")
+    settings.boxSettings.extents = [100, 100, 100]
+    let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
+    assert(restored == settings)
+    settings.boxSettings.extents = [0, 100, 100]
+    do { try settings.validate(); assertionFailure("Collapsed box accepted") } catch {}
+    print("Ruler boxes: shared camera/isometric geometry, bounded edges/corners, incident-edge changes, no branch jumps, accuracy, reset, on-canvas sizing, near-plane bypass and JSON passed.")
+}
+
+func checkRadialAndIsometric() throws {
+    var settings = RulerSettings()
+    assert(settings.radialSettings.locked && settings.radialSettings.bend == 0 && settings.axisAngles == nil)
+    settings.kind = .radial; settings.centerX = 0; settings.centerY = 0; settings.enabled = true
+    settings.radialSettings.locked = false; settings.radialSettings.bend = 0.3
+    let direction = RulerGeometry.direction(14.3)
+    let start = RulerGeometry.radialPoint(center: .zero, direction: direction, bend: 0.3, parameter: 500)
+    let inferred = RulerGeometry.directions(settings, anchor: start)[0]
+    assert(hypot(inferred.x - direction.x, inferred.y - direction.y) < 1e-10, "Free curved ray must pass through its hovering start")
+    for bend in [-2.0, -0.3, 0.3, 2.0, 1e-9] {
+        for input in [CGPoint(x: -400, y: 300), CGPoint(x: 900, y: 900), CGPoint(x: 0, y: 1000)] {
+            let nearest = RulerGeometry.nearestRadial(input, center: .zero, direction: CGPoint(x: 1, y: 0), bend: bend, previous: nil)
+            assert(nearest.parameter >= 0 && nearest.point.x.isFinite && nearest.point.y.isFinite)
+            assert(abs(nearest.point.y - bend * nearest.point.x * nearest.point.x / 1000) < 1e-6)
+            let sampled = (0...10000).map { RulerGeometry.radialPoint(center: .zero, direction: CGPoint(x: 1, y: 0), bend: bend, parameter: Double($0) * 0.3) }
+                .map { hypot($0.x - input.x, $0.y - input.y) }.min()!
+            assert(hypot(nearest.point.x - input.x, nearest.point.y - input.y) <= sampled + 1e-6, "Analytic projection must be at least as close as a dense independent sample")
+        }
+    }
+    settings.radialSettings.bend = 0.5
+    let first = CGPoint(x: 100, y: 5), input = CGPoint(x: 200, y: 100)
+    let projected = RulerGeometry.nearestRadial(input, center: .zero, direction: CGPoint(x: 1, y: 0), bend: 0.5, previous: 100).point
+    for accuracy in [0.0, 0.5, 1.0] {
+        settings.accuracy = accuracy
+        var projection = RulerProjection(); projection.configure(settings)
+        _ = projection.process(first, settings: settings)
+        let result = projection.process(input, settings: settings)
+        assert(hypot(result.x - (input.x + (projected.x - input.x) * accuracy), result.y - (input.y + (projected.y - input.y) * accuracy)) < 1e-7)
+        projection.reset()
+        assert(projection.selected == nil)
+    }
+    settings.accuracy = 1
+    var centerStart = RulerProjection(); centerStart.configure(settings)
+    assert(centerStart.process(.zero, settings: settings) == .zero && centerStart.selected == nil)
+    _ = centerStart.process(CGPoint(x: 0, y: 50), settings: settings)
+    assert(centerStart.selected != nil, "Center start must acquire from outward movement rather than arbitrary center angle")
+    settings.radialSettings.bend = 0
+    settings.radialSettings.locked = true; settings.spacing = 30
+    let locked = RulerGeometry.directions(settings, anchor: CGPoint(x: 100, y: 2))[0]
+    assert(locked == CGPoint(x: 1, y: 0))
+    let straight = RulerGeometry.nearestRadial(CGPoint(x: -100, y: 50), center: .zero, direction: locked, bend: 0, previous: nil)
+    assert(straight.point == CGPoint(x: -100, y: 0), "Legacy straight lines extend through the center")
+    settings.radialSettings.bend = .infinity
+    do { try settings.validate(); assertionFailure("Non-finite bend accepted") } catch {}
+    settings.radialSettings.bend = 0.3
+    settings.kind = .isometric
+    settings.useIsometricPreset(1)
+    assert(abs(tan(settings.angle * .pi / 180) - 0.5) < 1e-10 && settings.axisAngles == nil)
+    settings.useIsometricPreset(2)
+    assert(settings.isometricAngles == [15, 150, 90])
+    let before = settings.isometricAngles
+    let edited = settings.editing(.isometricAxis(1), delta: CGPoint(x: 20, y: 30))!
+    assert(edited.isometricAngles[0] == before[0] && edited.isometricAngles[2] == before[2] && edited.isometricAngles[1] != before[1])
+    settings.orientation = 30
+    assert(hypot(RulerGeometry.directions(settings, anchor: .zero)[0].x - cos(.pi / 4), RulerGeometry.directions(settings, anchor: .zero)[0].y - sin(.pi / 4)) < 1e-10)
+    let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
+    assert(restored == settings)
+    settings.axisAngles = [0, 90]
+    do { try settings.validate(); assertionFailure("Invalid axis count accepted") } catch {}
+    print("Radial/isometric: free/locked curved rays, analytic nearest-point oracle, center/lift, accuracy, legacy straight lines, independent axes/presets, invalid values and JSON passed.")
+}
+
+func checkRulerConstructions() throws {
+    var colored = RulerSettings()
+    let custom = RulerGuideColor(red: 0.12, green: 0.34, blue: 0.56)
+    assert(colored.guideColor(at: 0) == nil)
+    colored.setGuideColor(custom, at: 2)
+    try colored.validate()
+    let restoredColors = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(colored))
+    assert(restoredColors == colored && restoredColors.guideColor(at: 2) == custom)
+    colored.kind = .isometric
+    assert(colored.guideColor(at: 2) == nil, "Overrides belong to their ruler")
+    colored.setGuideColor(custom, at: 0)
+    colored.resetGuideColors()
+    colored.kind = .radial
+    assert(colored.guideColor(at: 2) == custom, "Reset must preserve other ruler palettes")
+    colored.setGuideColor(nil, at: 2)
+    assert(colored.guideColors == nil, "Reset restores absent/default palette")
+    colored.setGuideColor(RulerGuideColor(red: 2, green: 0, blue: 0), at: 0)
+    do { try colored.validate(); assertionFailure("Invalid color accepted") } catch {}
+    colored.guideColors = ["unknown": [custom]]
+    do { try colored.validate(); assertionFailure("Unknown palette accepted") } catch {}
+
+    func near(_ a: CGPoint, _ b: CGPoint, _ tolerance: Double = 1e-7) -> Bool { hypot(a.x - b.x, a.y - b.y) < tolerance }
+    var camera = RulerCamera()
+    for points in 1...3 {
+        camera.points = points
+        try camera.validate()
+        let axes = camera.axes
+        for i in 0..<3 {
+            assert(abs(axes[i].x * axes[i].x + axes[i].y * axes[i].y + axes[i].z * axes[i].z - 1) < 1e-10)
+            for j in 0..<i { assert(abs(axes[i].x * axes[j].x + axes[i].y * axes[j].y + axes[i].z * axes[j].z) < 1e-10) }
+        }
+        let directions = camera.directions(center: CGPoint(x: 700, y: 450), anchor: CGPoint(x: 850, y: 600))
+        assert(directions.count == 3 && directions.allSatisfy { $0.x.isFinite && $0.y.isFinite })
+        if points == 1 { assert(abs(directions[0].y) < 1e-10 && abs(directions[1].x) < 1e-10) }
+        if points == 2 { assert(abs(directions[1].x) < 1e-10) }
+    }
+    var settings = RulerSettings()
+    settings.kind = .perspective; settings.camera = camera; settings.enabled = true; settings.family = 1
+    let anchor = CGPoint(x: 900, y: 700), input = CGPoint(x: 1100, y: 740)
+    let expected = RulerGeometry.line(input, origin: anchor, direction: RulerGeometry.directions(settings, anchor: anchor)[0])
+    for accuracy in [0.0, 0.5, 1.0] {
+        settings.accuracy = accuracy
+        var projection = RulerProjection(); projection.configure(settings)
+        _ = projection.process(anchor, settings: settings)
+        let result = projection.process(input, settings: settings)
+        assert(near(result, CGPoint(x: input.x + (expected.x - input.x) * accuracy, y: input.y + (expected.y - input.y) * accuracy)))
+        if accuracy > 0 { assert(projection.selected == RulerGeometry.directions(settings, anchor: anchor)[0]) }
+    }
+    settings.measureSettings.visible = true
+    let ticks = RulerGeometry.ticks(settings, anchor: settings.center, family: 0).filter { $0.point.x > settings.centerX }
+    assert(ticks.count > 2)
+    assert(hypot(ticks[2].point.x - ticks[1].point.x, ticks[2].point.y - ticks[1].point.y) < hypot(ticks[1].point.x - ticks[0].point.x, ticks[1].point.y - ticks[0].point.y), "Equal world steps compress toward the vanishing point")
+    settings.measureSettings.divisions = 10
+    assert(RulerGeometry.ticks(settings, anchor: anchor, family: 2).count <= 400)
+    let movedCamera = settings.editing(.move, delta: CGPoint(x: -50, y: 20))!
+    assert(movedCamera.centerX == settings.centerX - 50 && movedCamera.vanishingPoints == settings.vanishingPoints)
+    assert(settings.editing(.viewTilt, delta: CGPoint(x: 0, y: 60))!.camera!.pitch == camera.pitch + 20)
+    assert(settings.editing(.fieldOfView, delta: CGPoint(x: 40, y: 0))!.camera!.fieldOfView == camera.fieldOfView + 10)
+    var badCamera = camera; badCamera.fieldOfView = .nan
+    do { try badCamera.validate(); assertionFailure() } catch {}
+    let legacy = try JSONDecoder().decode(RulerSettings.self, from: Data("{\"enabled\":true,\"visible\":true,\"kind\":\"perspective\",\"accuracy\":1,\"opacity\":0.25,\"centerX\":700,\"centerY\":450,\"angle\":30,\"spacing\":15,\"vanishingPoints\":[{\"x\":100,\"y\":400}],\"corners\":[{\"x\":0,\"y\":0},{\"x\":100,\"y\":0},{\"x\":100,\"y\":100},{\"x\":0,\"y\":100}]}".utf8))
+    assert(legacy.camera == nil && legacy.ellipseSizing == .fixed && !legacy.measureSettings.visible)
+    let restoredConstruction = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
+    assert(restoredConstruction == settings)
+    settings.kind = .vanishing; settings.camera = nil; settings.family = 1
+    settings.vanishingPoints = [RulerPoint(x: 1000, y: 400)]
+    settings.matchScene(true)
+    try settings.validate()
+    let sceneDirection = RulerGeometry.directions(settings, anchor: .zero)[0]
+    assert(abs(sceneDirection.y / sceneDirection.x - 0.4) < 1e-8)
+    settings.sceneLines = [[RulerPoint(x: 0, y: 0), RulerPoint(x: 100, y: 10), RulerPoint(x: 0, y: 50), RulerPoint(x: 100, y: 60)]]
+    try settings.validate()
+    let scenePayload = try JSONEncoder().encode(settings)
+    let restoredScene = try JSONDecoder().decode(RulerSettings.self, from: scenePayload)
+    assert(restoredScene == settings)
+    let infinity = RulerGeometry.sceneVanishingPoint(settings.sceneLines![0])!
+    assert(infinity.z == 0 && abs(infinity.y / infinity.x - 0.1) < 1e-8)
+    settings.accuracy = 1
+    var infiniteProjection = RulerProjection(); infiniteProjection.configure(settings)
+    _ = infiniteProjection.process(CGPoint(x: 800, y: 600), settings: settings)
+    assert(near(infiniteProjection.process(CGPoint(x: 900, y: 600), settings: settings), RulerGeometry.line(CGPoint(x: 900, y: 600), origin: CGPoint(x: 800, y: 600), direction: CGPoint(x: 1, y: 0.1))))
+    settings.sceneLines![0][1] = settings.sceneLines![0][0]
+    do { try settings.validate(); assertionFailure("Collapsed scene line accepted") } catch {}
+    settings.sceneLines = nil
+    settings.kind = .perspectiveEllipse
+    settings.corners = [RulerPoint(x: 100, y: 100), RulerPoint(x: 400, y: 150), RulerPoint(x: 350, y: 400), RulerPoint(x: 150, y: 350)]
+    let plane = RulerPlane(settings.corners)!
+    for unit in [CGPoint.zero, CGPoint(x: 1, y: 1), CGPoint(x: 0.5, y: 0.5), CGPoint(x: 0.2, y: 0.7)] {
+        assert(near(plane.unit(plane.screen(unit)!)!, unit))
+    }
+    let center = plane.screen(CGPoint(x: 0.5, y: 0.5))!
+    assert(near(center, settings.editingCenter))
+    let moved = settings.editing(.move, delta: CGPoint(x: 20, y: 15))!
+    assert(near(moved.editingCenter, CGPoint(x: center.x + 20, y: center.y + 15)))
+    let inverse = moved.corners.compactMap { plane.unit($0.cg) }
+    assert(inverse.count == 4 && abs(inverse[1].x - inverse[0].x - 1) < 1e-7 && abs(inverse[3].y - inverse[0].y - 1) < 1e-7, "Plane move preserves dimensions in world plane")
+    let free = settings.editing(.move, delta: CGPoint(x: 20, y: 15), screenSpace: true)!
+    assert(free.corners[0].x == 120 && free.corners[0].y == 115)
+    let edge = settings.editing(.edge(0), delta: CGPoint(x: 0, y: -10))!
+    let topLeft = plane.unit(edge.corners[0].cg)!, topRight = plane.unit(edge.corners[1].cg)!
+    assert(abs(topLeft.y - topRight.y) < 1e-7, "Edge slides preserve the plane's vanishing points")
+    settings.ellipseSizing = .concentric
+    let through = plane.screen(CGPoint(x: 0.75, y: 0.5))!
+    assert(abs(RulerGeometry.ellipseRadius(settings, through: through) - 0.5) < 1e-7)
+    settings.accuracy = 1
+    var projection = RulerProjection(); projection.configure(settings)
+    assert(near(projection.process(through, settings: settings), through))
+    let outside = plane.screen(CGPoint(x: 0.5, y: 0.9))!
+    let onLockedCircle = RulerGeometry.nearest(outside, on: RulerGeometry.projectedCircle(settings.corners, radius: 0.5)!)
+    assert(near(projection.process(outside, settings: settings), onLockedCircle, 0.02), "Concentric size locks for a stroke")
+    projection.reset()
+    let nextStart = plane.screen(CGPoint(x: 0.9, y: 0.5))!
+    assert(near(projection.process(nextStart, settings: settings), nextStart, 0.02))
+    for accuracy in [0.0, 0.5, 1.0] {
+        settings.ellipseSizing = .fixed; settings.circleRadius = 0.5; settings.accuracy = accuracy
+        var fixed = RulerProjection(); fixed.configure(settings)
+        let result = fixed.process(outside, settings: settings)
+        assert(near(result, CGPoint(x: outside.x + (onLockedCircle.x - outside.x) * accuracy, y: outside.y + (onLockedCircle.y - outside.y) * accuracy), 0.02))
+    }
+    settings.circleRadius = 1
+    settings.ellipseSizing = .stepped
+    settings.circleStep = 0.25
+    assert(abs(RulerGeometry.ellipseRadius(settings, through: plane.screen(CGPoint(x: 0.82, y: 0.5))!) - 0.75) < 1e-7)
+    assert(settings.editing(.corner(0), delta: CGPoint(x: 200, y: 200)) == nil)
+    print("Ruler constructions: camera orthogonality/1–3 point/infinite axes, accuracy, ticks, editing, legacy JSON, projective plane round trip, plane edits and concentric stroke locks passed.")
+}
+
 func checkRulers() throws {
+    try checkRulerPickerShortcut()
+    try checkPriorityRulerPipeline()
+    try checkVanishingMeasurements()
+    try checkEllipseDepth()
+    try checkCameraInclinesAndPlanes()
+    try checkAutomaticRulerAxes()
+    try checkLearnedRulerBoxes()
+    try checkRulerAxisAndReference()
+    try checkRulerBoxes()
+    try checkRadialAndIsometric()
+    try checkRulerConstructions()
     var editable = RulerSettings()
     editable.kind = .perspectiveEllipse
     editable.corners = [RulerPoint(x: 0, y: 0), RulerPoint(x: 100, y: 0), RulerPoint(x: 100, y: 100), RulerPoint(x: 0, y: 100)]
     let shifted = editable.editing(.move, delta: CGPoint(x: 20, y: -10))!
-    assert(shifted.corners[0] == RulerPoint(x: 20, y: -10) && shifted.corners[2] == RulerPoint(x: 120, y: 90))
+    assert(hypot(shifted.corners[0].x - 20, shifted.corners[0].y + 10) < 1e-7 && hypot(shifted.corners[2].x - 120, shifted.corners[2].y - 90) < 1e-7)
     assert(shifted.vanishingPoints == editable.vanishingPoints, "Editing must not move unrelated family geometry")
     let edge = editable.editing(.edge(0), delta: CGPoint(x: 0, y: -20))!
-    assert(edge.corners[0].y == -20 && edge.corners[1].y == -20 && edge.corners[2].y == 100)
+    assert(abs(edge.corners[0].y + 20) < 1e-7 && abs(edge.corners[1].y + 20) < 1e-7 && edge.corners[2].y == 100)
     assert(editable.editing(.corner(0), delta: CGPoint(x: 150, y: 150)) == nil, "Crossed preview must be rejected")
     assert(editable.editing(.corner(9), delta: .zero) == nil)
     assert(editable.editing(.move, delta: CGPoint(x: Double.nan, y: 0)) == nil)
@@ -88,30 +801,6 @@ func checkRulers() throws {
     let release = output.events(for: sample, time: 1.02).first { $0.type == .leftMouseUp }
     assert(release?.location == last && release?.getDoubleValueField(.tabletEventPointPressure) == 0)
     assert(!output.isContact)
-    settings.stringSettings.enabled = true; settings.stringSettings.length = 50
-    settings.rulerSettings.kind = .perspectiveEllipse
-    output.settings = settings
-    sample.pressure = 1000
-    let controlPoint = output.mappedLocation(for: sample)
-    output.overlayControlBounds = [CGRect(x: controlPoint.x - 10, y: controlPoint.y - 10, width: 20, height: 20)]
-    _ = output.events(for: sample)
-    assert(output.outputLocation == controlPoint, "A pen tap on canvas controls must bypass positional filters")
-    sample.x += 5000; sample.y += 5000
-    _ = output.events(for: sample)
-    assert(output.outputLocation == output.mappedLocation(for: sample), "A control gesture stays direct outside the toolbar")
-    sample.pressure = 0; _ = output.events(for: sample)
-    sample.pressure = 1000; _ = output.events(for: sample)
-    assert(output.outputLocation != output.mappedLocation(for: sample), "Drawing outside controls must still snap")
-    sample.x -= 5000; sample.y -= 5000
-    _ = output.events(for: sample)
-    assert(output.outputLocation != controlPoint, "An existing drawing stroke must not switch filters when crossing controls")
-    sample.pressure = 0; _ = output.events(for: sample)
-    output.overlayMenuTracking = true
-    sample.x += 5000; sample.pressure = 1000
-    _ = output.events(for: sample)
-    assert(output.outputLocation == output.mappedLocation(for: sample), "Ruler menu items must be reachable with the pen")
-    sample.pressure = 0; _ = output.events(for: sample)
-    output.overlayMenuTracking = false
 
 }
 

@@ -44,6 +44,8 @@ final class AppModel: NSObject, ObservableObject {
     private let stringOverlay = StringGuideOverlay()
     private let rulerOverlay = RulerOverlay()
     @Published private(set) var rulerEditing = false
+    @Published private(set) var rulerPickerVisible = false
+    var rulerKeyboardStatus: String { rulerOverlay.keyboardStatus }
     private var displayObserver: NSObjectProtocol?
     private var activationObserver: NSObjectProtocol?
     var installed: Bool { Bundle.main.bundleURL.standardizedFileURL.path == "/Applications/WaccomDrive.app" }
@@ -99,13 +101,8 @@ final class AppModel: NSObject, ObservableObject {
         rulerOverlay.contactAnchor = { [weak self] in self?.withSession { $0.output.rulerGuideAnchor } ?? .zero }
         rulerOverlay.isContact = { [weak self] in self?.withSession { $0.output.isContact } ?? false }
         rulerOverlay.onToggleEditing = { [weak self] in self?.toggleRulerEditing() }
-        rulerOverlay.onSelectKind = { [weak self] kind in self?.selectCanvasRuler(kind) }
-        rulerOverlay.onControlBoundsChanged = { [weak self] bounds in
-            self?.withSession { $0.output.overlayControlBounds = bounds }
-        }
-        rulerOverlay.onMenuTracking = { [weak self] tracking in
-            self?.withSession { $0.output.overlayMenuTracking = tracking }
-        }
+        rulerOverlay.pickerShortcut = { [weak self] in self?.saved.pickerShortcut }
+        rulerOverlay.onTogglePicker = { [weak self] in self?.toggleRulerPicker() }
         withSession { session in
             session.onConnection = { [weak self] count, _ in
                 DispatchQueue.main.async {
@@ -265,6 +262,7 @@ final class AppModel: NSObject, ObservableObject {
         }
     }
     func toggleDriver() {
+        rulerOverlay.finishPicker(nil)
         if running {
             withSession { $0.setPosting(false) }; running = false
             UserDefaults.standard.set(false, forKey: "driverEnabled")
@@ -325,47 +323,72 @@ final class AppModel: NSObject, ObservableObject {
         } catch { self.error = "Could not activate pressure profile: \(error.localizedDescription)" }
     }
     func toggleRulerEditing() {
+        rulerOverlay.finishPicker(nil)
         guard !withSession({ $0.output.isContact }) else { message = "Lift the pen before editing rulers."; return }
         guard saved.advancedFeaturesEnabled, saved.rulerSettings.enabled else { return }
         rulerEditing.toggle()
+        configureRulerInteraction()
+        rulerOverlay.setEditing(rulerEditing) { [weak self] ruler in _ = self?.moveRuler(ruler) }
+    }
+    private func configureRulerInteraction() {
         var next = saved
-        if rulerEditing {
+        if rulerEditing || rulerPickerVisible {
             next.rulerSettings.enabled = false
             next.stringSettings.enabled = false
         }
         withSession { [next] in $0.configure(next) }
-        rulerOverlay.setEditing(rulerEditing) { [weak self] ruler in self?.moveRuler(ruler) }
     }
-    func selectCanvasRuler(_ kind: RulerKind) {
-        guard !withSession({ $0.output.isContact }) else { return }
-        do {
-            var next = saved
-            next.rulerSettings.kind = kind
-            next.rulerSettings.family = 0
-            try next.validate()
-            try SettingsFile.write(next, to: file.url)
-            var active = next
-            if rulerEditing { active.rulerSettings.enabled = false; active.stringSettings.enabled = false }
-            withSession { [active] in $0.configure(active) }
-            saved = next
-            draft.rulerSettings.kind = kind
-            draft.rulerSettings.family = 0
-            message = "Ruler: \(kind.title)"
-        } catch { self.error = "Could not select ruler: \(error.localizedDescription)" }
+    func toggleRulerPicker() {
+        if rulerPickerVisible { rulerOverlay.finishPicker(nil); return }
+        let pointerHeld = [CGMouseButton.left, .right, .center].contains { CGEventSource.buttonState(.combinedSessionState, button: $0) }
+        guard running, !pointerHeld, !withSession({ $0.output.isContact || $0.output.heldMouse != nil }) else {
+            message = "Start the driver and lift the pen before opening the ruler picker."; return
+        }
+        if rulerEditing { toggleRulerEditing() }
+        rulerPickerVisible = true
+        if !rulerOverlay.presentPicker(current: saved.rulerSettings.kind, rulerEnabled: saved.rulerSettings.enabled, finished: { [weak self] kind in
+            guard let self else { return }
+            self.rulerPickerVisible = false
+            if kind == .toggleRuler {
+                var ruler = self.saved.rulerSettings
+                ruler.enabled.toggle()
+                if ruler.enabled { ruler.visible = true }
+                if self.moveRuler(ruler) {
+                    self.draft.rulerSettings.enabled = ruler.enabled
+                    self.draft.rulerSettings.visible = ruler.visible
+                    self.message = ruler.enabled ? (self.saved.advancedFeaturesEnabled ? "Ruler on." : "Ruler enabled. Turn on Advanced features to use it.") : "Ruler off."
+                }
+                self.configureRulerInteraction()
+                return
+            }
+            if case .ruler(let kind) = kind {
+                let followsSavedKind = self.draft.rulerSettings.kind == self.saved.rulerSettings.kind
+                var ruler = self.saved.rulerSettings; ruler.kind = kind
+                if self.moveRuler(ruler) {
+                    if followsSavedKind { self.draft.rulerSettings.kind = kind }
+                    self.message = "Ruler: \(kind.title)."
+                }
+            }
+            self.configureRulerInteraction()
+        }) {
+            rulerPickerVisible = false
+            configureRulerInteraction()
+            message = "Picker unavailable. \(rulerOverlay.keyboardStatus)"
+        } else { configureRulerInteraction() }
     }
     func toggleRulerGuide() {
-        guard !rulerEditing else { return }
+        guard !rulerEditing, !rulerPickerVisible else { return }
+        defer { configureRulerInteraction() }
         do {
             var next = saved
             next.rulerSettings.visible.toggle()
             try SettingsFile.write(next, to: file.url)
-            withSession { [next] in $0.configure(next) }
             saved = next
             draft.rulerSettings.visible = next.rulerSettings.visible
             message = next.rulerSettings.visible ? "Ruler guides shown." : "Ruler guides hidden; snapping is unchanged."
         } catch { self.error = "Could not change ruler visibility: \(error.localizedDescription)" }
     }
-    private func moveRuler(_ ruler: RulerSettings) {
+    @discardableResult private func moveRuler(_ ruler: RulerSettings) -> Bool {
         do {
             var next = saved
             next.rulerSettings = ruler
@@ -375,7 +398,8 @@ final class AppModel: NSObject, ObservableObject {
             saved = next
             if wasClean { draft.ruler = next.ruler }
             message = "Ruler position saved. Finish on-screen editing to draw."
-        } catch { self.error = "Could not move ruler: \(error.localizedDescription)" }
+            return true
+        } catch { self.error = "Could not move ruler: \(error.localizedDescription)"; return false }
     }
     func copyPenTiming() {
         let report = "WaccomDrive pen timing\nConnection: \(connectionDescription)\nInput thread: \(inputThreadActive ? "dedicated (user-interactive)" : "main")\nAdvanced: \(saved.advancedFeaturesEnabled); ruler: \(saved.rulerSettings.enabled); string: \(saved.stringSettings.enabled)\n" + withSession { $0.output.timing.summary }
@@ -388,6 +412,8 @@ final class AppModel: NSObject, ObservableObject {
         message = "Pen timing reset. Move the pen, then copy the timing report."
     }
     func save() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        rulerOverlay.finishPicker(nil)
         if rulerEditing { toggleRulerEditing() }
         do {
             try draft.validate()

@@ -74,7 +74,10 @@ struct ContentView: View {
                     Text(model.dirty ? "Unsaved changes" : model.message)
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     Spacer()
-                    if model.dirty { Button("Discard changes") { model.draft = model.saved } }
+                    if model.dirty { Button("Discard changes") {
+                        NSApp.keyWindow?.makeFirstResponder(nil)
+                        model.draft = model.saved
+                    } }
                     Button("Save & Apply") { model.save() }
                 }.padding(16)
             }

@@ -190,42 +190,169 @@ Settings/backups store optional pressureSpeed data; absent data remains off. The
 
 ### Ruler development build
 
-The Rulers page now provides an initial numeric editor for radial, isometric,
-direct vanishing-point construction and a projectively transformed circle.
-Enable **Advanced features**, enable the ruler, then **Save & Apply**. Accuracy
-0% is guide-only; 100% projects contact positions after pulled-string smoothing.
-Guides stay fixed in logical screen coordinates and pass clicks through.
+The Rulers page provides radial, isometric, perspective, vanishing-line and
+perspective-ellipse guides. Enable **Advanced features**, enable the ruler, then
+**Save & Apply**. Accuracy 0% is guide-only; 100% projects contact positions after
+pulled-string smoothing. Guides use logical screen coordinates: realign them
+when you pan, zoom or rotate the painting canvas.
 
-Guides use retained Core Animation shape layers for GPU composition. CPU path
-construction runs only when configuration/display layout changes; pen reports do
-not redraw the guides. Snapping remains bounded CPU geometry in the input path.
-This does not establish an FPS improvement: live drawing/performance acceptance
-is still pending. `script/check_ruler_overlay.swift` verifies native layer and
-window behavior; the CLI self-check includes projection and lifecycle checks.
+Hold **Control while lifted** to reveal edit handles over the painting app.
+Release Control after dragging to return to drawing. Choose the ruler and edit numeric values on the Rulers page. Dragging previews live; release validates and saves geometry.
+Edit handles use 16×16 SF Symbols inside 32×32 click targets; hover for names
+and current mode. Only edit handles capture clicks. Off-screen controls use spaced
+proxies inside the display's usable area. Show/Hide Ruler Guides in the menu bar
+changes visibility without changing snapping. Editing temporarily bypasses
+string and ruler position filters.
 
-Use the **ruler bar on the canvas** (upper right of each display) to choose a
-ruler and click **Edit ruler**. Click **Done** to return to drawing. The driver
-window is only needed for precise numeric configuration. The menu bar and Rulers
-page retain their editing shortcuts. Guides preview continuously while dragging; release validates and
-saves the geometry, and Finish Editing restores drawing. Move/rotate handles are
-distinct from point controls; projected ellipses also have edge and uniform-size
-handles. Isometric rotation is separate from its axis angle. Invalid changes and
-cancelled gestures leave the saved geometry intact.
-Only handles capture clicks; guides remain click-through. Off-screen points have
-edge handles that preserve their offset during dragging and are spaced apart
-when several controls fall outside the same display edge. The menu bar also
-provides Show/Hide Ruler Guides without changing snapping. In edit mode, string
-and ruler position processing are temporarily bypassed so handles follow input.
+Press **Control–Option–R** while lifted to open the semicircular ruler picker near
+the pen. It offers the five implemented rulers with SF Symbols, hover names and
+a current-ruler marker, and flips/clamps at display edges. Select by pen/mouse,
+arrows or Tab and Enter, or keys **1–5** from left to right. **Escape**, the same
+shortcut again, or an outside click cancels. The center power button (or **G**)
+turns the ruler on/off (guide and snapping). Turning it on also shows its guide;
+the Advanced master must be enabled. The painting app keeps focus; menu
+click/drag/release events are captured so selection cannot draw on the canvas.
+String/ruler position filters pause for raw menu targeting and resume on close.
+Selection changes only the ruler type, preserving geometry, accuracy and the
+Advanced master. It will not open during pen contact or a held pen-button action.
 
-Automatic direction selection waits for at least 8 screen points and a clear
-family, then locks until lift. The acquisition distance is adjustable; select a
-Direction family explicitly when directions are nearly parallel.
+Change or clear the binding under **Rulers → Picker shortcut**, then **Save &
+Apply**. Existing settings without a binding use Control–Option–R; an explicit
+clear stays disabled after restart. **Choose Ruler…** in the status menu and
+**Open ruler picker** on Rulers offer the same picker. Accessibility permission
+is needed for the captured shortcut/menu interaction.
 
-This is an incomplete development increment: camera-based perspective, scene-line
-matching, extended construction modes and the remaining ruler
-families are tracked in the ruler task. The Perspective entry currently exposes
-direct vanishing-point construction, not camera/FOV controls. Perspective-ellipse
-snapping uses a bounded 512-segment approximation of the transformed circle.
+Isometric, perspective and vanishing-line guides follow the cursor and anchor at
+stroke start. The selected axis is emphasized until lift. Automatic selection
+waits for the acquisition distance (default 8 points), a clear family and a few
+more points of directional agreement. Tap Control while drawing to cycle axes
+without lifting; the new segment starts from the last delivered point. Holding
+Control while lifted still reveals edit handles. Choose a family explicitly for
+nearly parallel axes.
+
+Perspective keeps existing direct-point setups unless camera mode is enabled.
+The **camera / numbered-square** handle cycles camera construction. Its center, rotation,
+size, angle, tilt and FOV handles adjust a shared pinhole camera. Numeric controls
+expose field of view, view radius, yaw, view tilt and horizon roll. Parallel axes
+are represented at infinity without huge substitute vanishing points.
+
+For Vanishing lines, click the **diagonal-line icon** while holding Control to toggle scene matching.
+Align each pair of colored construction lines with parallel edges in your scene.
+Pairs may be parallel on screen; collapsed or coincident lines are rejected.
+Direct vanishing points are preserved when scene matching is enabled.
+**Shift-drag** either endpoint to move its whole construction line. **Option-drag**
+aligns it with its partner or screen axes; family 3 also offers the direction
+perpendicular to the horizon. With direct points, Shift constrains VP1/2 to their
+horizon, and Option snaps nearby horizontal/vertical alignment. The horizon can
+be shown from Rulers or toggled with its on-canvas handle.
+
+**Projective family measurements** adds independent first-unit distances and
+subdivisions. Pin a reference, then drag each family's ruler handle onto a known
+unit. Ticks divide equal scene distances toward the VP, while parallel directions
+keep equal screen spacing. A first unit at/past its VP hides that family's ticks;
+move the reference or reduce the unit distance. Calibration is relative to that
+reference, not a recovered physical scene scale. Turning the option off restores
+the original screen-spaced ticks.
+
+For perspective ellipses, the **circle handle** cycles fixed, cursor-concentric and stepped sizing. Concentric size locks at pen-down until lift. The **resize-arrows handle** adjusts radius within the plane. Center/edge handles preserve the projected plane;
+**Shift-drag** snaps plane movement to steps, resizes the quad from corners, and
+moves opposite edges symmetrically. **Option-drag** moves centers/edges in screen
+space or constrains a corner along an adjacent edge. Enable the editing grid to
+see the plane steps. Snapping and guides share the same
+bounded 512-segment projected circle, centered in the world plane rather than at
+the ellipse's screen bounding-box center.
+For small or thin ellipses, Control-editing handles sit outside the ellipse with
+a clear gap. Their targets and drag behavior remain the same, including near
+screen edges and when a small circle sits inside a larger construction plane.
+
+Enable **Depth sections** to define a third vanishing point directly or from two
+scene lines. Camera-generated circle planes also prepare their normal direction.
+While holding Control, the **layers handle** toggles depth, **vertical arrows**
+slide along it, and **resize arrows** change the top section scale for a cone.
+Click the depth arrows for the next section; Shift-click goes back. Shift-drag
+snaps depth/radius to their configured steps. Reference and top circles share
+projective geometry, with cylinder/cone tangent guides where visible. A separate
+**Depth and tangents** color controls those guides. Plane edits bake the current
+section as the new reference; numeric depth offset zero restores the reference
+until then. Directions in the reference plane and camera-plane crossings are
+rejected. Depth units are locally calibrated screen points, not physical lengths.
+
+**Rulers → Guideline colors** provides a native color picker for each guideline
+or direction family. Overrides are saved separately per ruler; reset one color
+or the current ruler palette to restore defaults. Choose **Save & Apply**.
+Opacity remains shared. Guides use a single colored 1-point stroke at the chosen
+opacity, with no black outline. The active axis uses a 1.75-point stroke and is
+brighter. Selected colors are preserved in both states.
+
+Radial supports **locked / free** angles and a calibrated quadratic bend (-2–2).
+Free mode follows the hovering pen and locks the selected ray for the stroke.
+The **curve-path icon** edits bend and **horizontal-arrows icon** edits angular spacing. Curved rays stop at
+the center; zero bend preserves legacy straight lines through the center.
+Guide curves and snapping use the same parabola; snapping solves nearest points
+analytically rather than searching sampled segments. Radial ticks use parameter
+distance along the starting direction, not arc length.
+
+Isometric provides independent axis angles and **30° / 2:1 / dimetric** presets.
+Hold Control to adjust the **numbered-circle axes** or cycle the **stacked-plane preset handle**. Whole-ruler rotation
+turns all axes together. Existing symmetric-angle settings keep their behavior
+until an independent axis is edited.
+
+Optional **Box construction** for isometric and camera perspective draws a
+bounded wireframe at pen-down. The **cube** toggles it; **numbered-square handles** resize its
+signed extents. Snapping follows an edge, stops overshoot at corners, and acquires
+an adjoining edge from that corner. It does not jump to edges crossing elsewhere
+on screen. Enable **Learn dimensions while drawing** (or use the **graduation-cap handle**)
+to learn extents instead. Draw the first dimension, tap Control to capture it and
+advance axes, then repeat for the other two. Once all three are captured, the
+box uses bounded edges. Dimensions reset on lift and never replace saved
+explicit extents. A dimension must be at least 2 points before it can be captured. Boxes crossing the camera plane are hidden and bypass
+snapping for that stroke. At partial accuracy, output blends toward the bounded
+edge rather than enforcing a hard limit.
+
+The **pin handle** fixes a measurement reference at the pen position where
+Control was pressed. Drag it to reposition or click it to unpin. Numeric reference
+coordinates are available on Rulers. The reference axes/ticks stay fixed while
+the drawing axes follow the cursor/stroke. Reference and drawing paths share
+their family's chosen color.
+
+While lifted over a painting app, keep **Control** held to edit with the keyboard:
+**arrows** move 1 logical point, **Option-arrows** 0.1 point, and **Shift-arrows**
+10 points. **Home** centers the construction at the pointer. **Backspace** restores
+the construction's state from entry to this editing session. These keys require
+the existing Accessibility permission and are captured only during editing;
+driver fields and pen contact retain their normal input. No drawing-app focus
+change is needed.
+During on-screen editing, Rulers shows whether the keyboard hook is ready or
+whether Accessibility/session availability needs attention. A ready hook does
+not override system-reserved shortcuts or establish painting-app acceptance.
+
+The **ruler icon** toggles measurement ticks on click and changes spacing on drag
+for radial, isometric and perspective. Numeric spacing and subdivisions are available on
+the Rulers page. Camera ticks represent equal world steps at image-plane depth;
+compare measurements from a common origin, not unrelated screen positions.
+
+Guides use retained Core Animation layers for GPU composition. Cursor/preview
+paths are coalesced at up to 60 Hz on the UI thread; input reports never wait for
+rendering. Control presses for axis changes are sampled on the input owner only
+when axis-capable ruler snapping is active. Snapping remains bounded CPU geometry
+on the dedicated input loop.
+The CLI self-check and `script/check_ruler_overlay.swift` cover geometry and
+native window behavior; physical drawing and combined-feature timing still need
+acceptance for this increment.
+
+Enable **Automatic axis changes** to infer turns while drawing; leave it off to
+retain the selected axis until a Control tap. Small or ambiguous movements keep
+the current direction. Learned boxes capture the original corner after a turn.
+
+Camera perspective also offers **Independent 3D axis inclines** and an
+**XY / XZ / YZ circle plane**. Choose a diameter and create a perspective ellipse,
+or use the circle/plane handle while holding Control. The helper uses the pinned
+reference or view center; its second axis is orthogonalized to make a true circle.
+Edge-on or camera-crossing planes are rejected.
+
+This task remains incomplete: physical acceptance of the new construction controls,
+remaining ruler families and broader display/app acceptance are tracked in the
+ruler task. No release or installer is implied by this development build.
 
 ### Dedicated input thread
 
