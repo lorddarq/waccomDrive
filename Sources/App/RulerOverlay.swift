@@ -23,6 +23,7 @@ final class RulerOverlay {
     private var handles: [RulerHandleID: NSPanel] = [:]
     private var editing = false
     private var modifierEditing = false
+    private var modifierUpdatePending = false
     var isContact: (() -> Bool)?
     var selectedFamily: (() -> Int?)?
     private var activeFamily: Int?
@@ -62,8 +63,13 @@ final class RulerOverlay {
         let point = event.location
         let repeatKey = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
         let consumed = MainActor.assumeIsolated {
-            if type == .tapDisabledByTimeout {
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 if let tap = overlay.keyboardTap { CGEvent.tapEnable(tap: tap, enable: true) }
+                overlay.scheduleModifierUpdate()
+                return false
+            }
+            if type == .flagsChanged {
+                overlay.scheduleModifierUpdate()
                 return false
             }
             if type != .keyDown && type != .keyUp {
@@ -76,13 +82,17 @@ final class RulerOverlay {
     }
     private func updateKeyboardTap() {
         guard editing || pickerOpening || picker.isVisible || pickerMouseCaptured || !capturedKeys.isEmpty || pickerShortcut?() != nil else { removeKeyboardTap(); return }
-        var mask = (CGEventMask(1) << CGEventType.keyDown.rawValue) | (CGEventMask(1) << CGEventType.keyUp.rawValue)
+        var mask = (CGEventMask(1) << CGEventType.keyDown.rawValue) | (CGEventMask(1) << CGEventType.keyUp.rawValue) | (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
         if pickerOpening || picker.isVisible || pickerMouseCaptured {
             for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp, .rightMouseDragged, .otherMouseDown, .otherMouseUp, .otherMouseDragged] {
                 mask |= CGEventMask(1) << type.rawValue
             }
         }
-        guard keyboardTap == nil || keyboardMask != mask else { return }
+        if let keyboardTap, !CFMachPortIsValid(keyboardTap) { removeKeyboardTap() }
+        if let keyboardTap, keyboardMask == mask {
+            if !CGEvent.tapIsEnabled(tap: keyboardTap) { CGEvent.tapEnable(tap: keyboardTap, enable: true) }
+            return
+        }
         removeKeyboardTap()
         guard AXIsProcessTrusted() else { return }
         guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
@@ -132,8 +142,8 @@ final class RulerOverlay {
             return true
         }
         if matchesPicker, !ownApp {
-            let firstPress = capturedKeys.insert(key).inserted
-            if firstPress, !repeatKey { DispatchQueue.main.async { [weak self] in self?.onTogglePicker?() } }
+            capturedKeys.insert(key)
+            if !repeatKey { DispatchQueue.main.async { [weak self] in self?.onTogglePicker?() } }
             return true
         }
         // Once captured, keep suppressing repeats until key-up, even after Control release.
@@ -245,28 +255,45 @@ final class RulerOverlay {
             MainActor.assumeIsolated {
                 guard let self else { return }
                 self.updateKeyboardTap()
-                self.updateModifier(NSEvent.modifierFlags.contains(.control))
+                self.reconcileModifier()
                 self.update()
             }
         }
         if let timer { RunLoop.main.add(timer, forMode: .common) }
     }
-    // Reuse the normal edit transition; never change routing in the middle of a stroke.
-    func updateModifier(_ held: Bool) {
-        guard !picker.isVisible, held != modifierEditing, dragBase == nil, !(isContact?() ?? false) else { return }
-        if held {
-            guard !editing, provider?() != nil else { return }
+    private func scheduleModifierUpdate() {
+        guard !modifierUpdatePending else { return }
+        modifierUpdatePending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.modifierUpdatePending = false
+            self.reconcileModifier()
+        }
+    }
+    private func reconcileModifier() {
+        updateModifier(CGEventSource.flagsState(.combinedSessionState).contains(.maskControl))
+    }
+    // Event-driven transitions plus authoritative-state polling recover missed
+    // releases. Settings writes and session routing stay outside the tap callback.
+    func updateModifier(_ held: Bool, pointerHeld: Bool = CGEventSource.buttonState(.combinedSessionState, button: .left)) {
+        guard !picker.isVisible else { return }
+        if !held, modifierEditing {
+            if dragBase != nil {
+                guard !pointerHeld else { return }
+                cancelDrag() // A lost mouse-up must not retain an unfinished edit.
+            }
+            if editing { onToggleEditing?() }
+            modifierEditing = editing // Retry if the normal exit was temporarily rejected.
+        } else if held, !modifierEditing {
+            guard !editing, dragBase == nil, !(isContact?() ?? false), provider?() != nil else { return }
             onToggleEditing?()
             modifierEditing = editing
-        } else {
-            modifierEditing = false
-            if editing { onToggleEditing?() }
         }
     }
     func stop() {
         timer?.invalidate(); timer = nil; provider = nil
         picker.dismiss(); pickerOpening = false; pickerFinished = nil; pickerButtons.removeAll()
-        editing = false; modifierEditing = false; edited = nil
+        editing = false; modifierEditing = false; modifierUpdatePending = false; edited = nil
         editGeneration += 1; keyboardPreview = nil; editingEntry = nil; capturedKeys.removeAll(); removeKeyboardTap()
         guideAnchor = nil; strokeAnchor = nil; referenceOrigin = nil
         cancelDrag()
@@ -341,7 +368,7 @@ final class RulerOverlay {
     }
     private func draw(_ settings: RulerSettings) {
         for (panel, frame) in zip(panels, frames) {
-            (panel.contentView as? RulerGuideView)?.render(settings, screen: frame, top: top, anchor: editing ? settings.editingCenter : (guideAnchor ?? settings.center), activeFamily: activeFamily, editing: editing)
+            (panel.contentView as? RulerGuideView)?.render(settings, screen: frame, top: top, anchor: editing ? settings.editingCenter : (guideAnchor ?? settings.center), activeFamily: activeFamily, editing: editing, contact: strokeAnchor != nil)
             if !panel.isVisible { panel.orderFrontRegardless() }
         }
     }
@@ -354,7 +381,11 @@ final class RulerOverlay {
     }
     private func handlePositions(_ settings: RulerSettings) -> [RulerHandleID: CGPoint] {
         var result: [RulerHandleID: CGPoint] = [:]
+        if let activeHandle, let panel = handles[activeHandle] {
+            result[activeHandle] = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
+        }
         var clearAreas: [CGRect] = []
+        var circlePoints: [CGPoint] = []
         if settings.kind == .ellipse {
             let bounds = RulerGeometry.ordinaryEllipse(settings).reduce(CGRect.null) { rect, point in
                 rect.union(CGRect(origin: CGPoint(x: point.x, y: top - point.y), size: .zero))
@@ -366,16 +397,39 @@ final class RulerOverlay {
             if settings.depthSettings.enabled { sections.append((settings.corners, settings.circleRadius)) }
             for (corners, radius) in sections {
                 guard let curve = RulerGeometry.projectedCircle(corners, radius: radius) else { continue }
-                let bounds = curve.reduce(CGRect.null) { rect, point in
-                    rect.union(CGRect(origin: CGPoint(x: point.x, y: top - point.y), size: .zero))
-                }
+                let native = curve.map { CGPoint(x: $0.x, y: top - $0.y) }
+                circlePoints += native
+                let bounds = native.reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) }
                 // Keep the actual circle visible even when its construction quad is large.
                 if min(bounds.width, bounds.height) <= 240 { clearAreas.append(bounds.insetBy(dx: -24, dy: -24)) }
             }
         }
-        for handle in settings.editHandles {
+        let ordered = settings.canvasEditHandles.sorted { a, b in
+            if case .corner = a.id { if case .corner = b.id { return false }; return settings.kind == .perspectiveEllipse }
+            return false
+        }
+        let frame = settings.kind == .perspectiveEllipse ? settings.ellipseEditFrame().map(\.cg).reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) } : .null
+        for handle in ordered {
+            if result[handle.id] != nil { continue }
             let point = handle.id == .reference && settings.fixedReference == nil ? referenceOrigin.map { CGPoint(x: $0.x + 40, y: $0.y + 40) } ?? handle.point : handle.point
-            guard let base = visiblePoint(point) else { continue }
+            var preferred = point
+            let corner: Bool
+            if settings.kind == .perspectiveEllipse, case .corner = handle.id {
+                corner = true
+                let dx = point.x - settings.editingCenter.x, dy = point.y - settings.editingCenter.y, length = max(1, hypot(dx, dy))
+                preferred = CGPoint(x: point.x + dx / length * 18, y: point.y + dy / length * 18)
+            } else {
+                corner = false
+                if !frame.isNull {
+                    switch handle.id {
+                    case .ellipseRadius: preferred = CGPoint(x: frame.maxX + 44, y: frame.midY)
+                    case .ellipseDepth: preferred = CGPoint(x: frame.maxX + 44, y: frame.midY + 44)
+                    case .ellipseScale: preferred = CGPoint(x: frame.maxX + 44, y: frame.midY + 88)
+                    default: break
+                    }
+                }
+            }
+            guard let base = visiblePoint(preferred) else { continue }
             var candidates = [base]
             for step in 1...16 {
                 let distance = Double(step) * 38
@@ -386,7 +440,7 @@ final class RulerOverlay {
             }
             result[handle.id] = candidates.first { candidate in
                 handleFrames.contains { $0.insetBy(dx: 20, dy: 20).contains(candidate) } &&
-                !clearAreas.contains { $0.contains(candidate) } &&
+                (corner ? !circlePoints.contains { CGRect(x: candidate.x - 20, y: candidate.y - 20, width: 40, height: 40).contains($0) } : !clearAreas.contains { $0.contains(candidate) }) &&
                 result.values.allSatisfy { hypot($0.x - candidate.x, $0.y - candidate.y) >= 36 }
             } ?? base
         }
@@ -399,7 +453,7 @@ final class RulerOverlay {
     }
     private func addHandles(_ settings: RulerSettings) {
         let positions = handlePositions(settings)
-        for handle in settings.editHandles {
+        for handle in settings.canvasEditHandles {
             guard let point = positions[handle.id] else { continue }
             let panel = GuidePanel(contentRect: CGRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
             configure(panel, title: "Ruler handle · \(handle.id.title)", clickThrough: false)
@@ -432,6 +486,16 @@ final class RulerOverlay {
 }
 
 extension RulerSettings {
+    var canvasEditHandles: [(id: RulerHandleID, point: CGPoint)] {
+        editHandles.filter { handle in
+            if handle.id == .size { return false }
+            guard kind == .perspectiveEllipse else { return true }
+            switch handle.id {
+            case .move, .rotate, .corner, .ellipseRadius, .ellipseDepth, .ellipseScale: return true
+            default: return false // Configuration and depth calibration live on Rulers.
+            }
+        }
+    }
     func guideNSColor(at index: Int) -> NSColor {
         if let color = guideColor(at: index) {
             return NSColor(srgbRed: color.red, green: color.green, blue: color.blue, alpha: 1)
@@ -446,7 +510,7 @@ private final class RulerGuideView: NSView {
     private var shapes: [CAShapeLayer] = []
     override init(frame: NSRect) { super.init(frame: frame); wantsLayer = true }
     required init?(coder: NSCoder) { nil }
-    func render(_ settings: RulerSettings, screen: CGRect, top: CGFloat, anchor: CGPoint, activeFamily: Int?, editing: Bool) {
+    func render(_ settings: RulerSettings, screen: CGRect, top: CGFloat, anchor: CGPoint, activeFamily: Int?, editing: Bool, contact: Bool) {
         var paths: [CGMutablePath] = []
         func local(_ p: CGPoint) -> CGPoint { CGPoint(x: p.x - screen.minX, y: top - p.y - screen.minY) }
         func ray(_ path: CGMutablePath, _ origin: CGPoint, _ direction: CGPoint) {
@@ -475,7 +539,9 @@ private final class RulerGuideView: NSView {
             let path = CGMutablePath(), companion = CGMutablePath(), c = settings.constructionSettings
             let direction = RulerGeometry.direction(settings.angle)
             if settings.kind == .ellipse {
-                let scale = editing ? 1 : RulerGeometry.constructionScale(settings, through: anchor)
+                // Contact snapshots already contain locked radii when snapping is active.
+                // Guide-only strokes still size at pen-down; lifted guides retain the edited size.
+                let scale = !editing && contact ? RulerGeometry.constructionScale(settings, through: anchor) : 1
                 path.addLines(between: RulerGeometry.ordinaryEllipse(settings, scale: scale).map(local))
                 if c.radial {
                     ray(companion, settings.center, CGPoint(x: anchor.x - settings.centerX, y: anchor.y - settings.centerY))
@@ -560,7 +626,7 @@ private final class RulerGuideView: NSView {
             let ellipse = CGMutablePath(), rectangle = CGMutablePath()
             let radius = editing ? settings.sectionRadius : RulerGeometry.ellipseRadius(settings, through: anchor)
             if let curve = RulerGeometry.projectedCircle(settings.sectionCorners, radius: radius) { ellipse.addLines(between: curve.map(local)) }
-            rectangle.addLines(between: settings.sectionCorners.map { local($0.cg) }); rectangle.closeSubpath()
+            rectangle.addLines(between: settings.ellipseEditFrame(radius: radius).map { local($0.cg) }); rectangle.closeSubpath()
             if editing, settings.showsPlaneGrid, let plane = RulerPlane(settings.sectionCorners) {
                 for i in 1..<Int(ceil(1 / settings.planeStep)) {
                     let t = Double(i) * settings.planeStep
@@ -580,15 +646,6 @@ private final class RulerGuideView: NSView {
                 }
                 for (base, top) in settings.depthTangents(radius: radius) {
                     depth.move(to: local(base)); depth.addLine(to: local(top))
-                }
-                if editing {
-                    if let lines = settings.depthSettings.sceneLines {
-                        for pair in [0, 2] { depth.move(to: local(lines[pair].cg)); depth.addLine(to: local(lines[pair + 1].cg)) }
-                    }
-                    if let v = settings.depthSettings.direction {
-                        let center = settings.editingCenter
-                        ray(depth, center, CGPoint(x: v.x - center.x * v.z, y: v.y - center.y * v.z))
-                    }
                 }
                 paths.append(depth)
             }
@@ -688,7 +745,7 @@ private extension RulerHandleID {
         case .ellipseVP: "3.circle.fill"
         case .ellipseSceneMode: "line.diagonal"
         case .ellipseScenePoint(let i): "\(i / 2 + 1).circle"
-        case .ellipseScale: "arrow.up.left.and.arrow.down.right"
+        case .ellipseScale: "cone"
         case .cameraMode: "camera"
         case .sceneMode: "line.diagonal"
         case .scenePoint(let i, _), .vanishing(let i): "\(i + 1).circle.fill"

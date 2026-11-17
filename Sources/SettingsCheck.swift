@@ -196,8 +196,29 @@ func checkEllipseDepth() throws {
         direction: CGPoint(x: settings.depthSettings.vanishingPoint.x - start.x, y: settings.depthSettings.vanishingPoint.y - start.y))
     // Handle uses the strongest component to preserve the cursor's progress along the axis.
     assert(hypot(moved.editingCenter.x - start.x, moved.editingCenter.y - start.y) > 1 && expectedLine.x.isFinite)
-    let baked = settings.editing(.move, delta: CGPoint(x: 10, y: 5))!
-    assert(baked.depthSettings.offset == 0 && baked.corners != settings.corners)
+    let shift = CGPoint(x: 0.12, y: -0.08)
+    let target = settings.sectionPoint(CGPoint(x: 0.5 + shift.x, y: 0.5 + shift.y), offset: 75)!
+    let cylinderMoved = settings.editing(.move, delta: CGPoint(x: target.x - start.x, y: target.y - start.y))!
+    assert(cylinderMoved.depthSettings.offset != 0 && cylinderMoved.depthSettings.scale == settings.depthSettings.scale)
+    for unit in corners {
+        let expected = project(center + a * (unit.x + shift.x - 0.5) + b * (unit.y + shift.y - 0.5) + direction * worldDistance)
+        let actual = cylinderMoved.sectionPoint(unit, offset: cylinderMoved.depthSettings.offset)!
+        assert(hypot(expected.x - actual.x, expected.y - actual.y) < 1e-7, "Plane movement must preserve cylinder depth and independent 3D translation")
+    }
+    for (handle, delta) in [(RulerHandleID.move, CGPoint(x: 15, y: -12)), (.rotate, CGPoint(x: 12, y: 4)), (.size, CGPoint(x: 15, y: 0)), (.corner(0), CGPoint(x: 3, y: -2)), (.edge(1), CGPoint(x: 4, y: 0))] {
+        let edited = settings.editing(handle, delta: delta, screenSpace: handle == .move)!
+        assert(edited.depthSettings.offset != 0 && edited.depthSettings.enabled && edited.depthSettings.scale == settings.depthSettings.scale)
+        assert(edited.depthTangents(radius: edited.sectionRadius).count == settings.depthTangents(radius: settings.sectionRadius).count)
+        try edited.validate()
+    }
+    for radius in [0.2, 1, 2] {
+        var frameSettings = settings; frameSettings.circleRadius = radius
+        let frame = RulerPlane(frameSettings.ellipseEditFrame())!
+        for point in RulerGeometry.projectedCircle(frameSettings.sectionCorners, radius: frameSettings.sectionRadius)! {
+            let unit = frame.unit(point)!
+            assert((0...1).contains(unit.x) && (0...1).contains(unit.y), "The deformation frame must enclose the displayed circle at every radius")
+        }
+    }
     let restored = try JSONDecoder().decode(RulerSettings.self, from: JSONEncoder().encode(settings))
     assert(restored == settings)
     settings.matchDepthScene(true)
@@ -256,12 +277,21 @@ func checkEllipseDepth() throws {
     let symmetric = settings.editing(.edge(1), delta: CGPoint(x: 24, y: 0), snap: true)!
     assert(symmetric.corners[0].x == -25 && symmetric.corners[1].x == 125)
     let resized = settings.editing(.corner(2), delta: CGPoint(x: 26, y: 26), snap: true)!
-    assert(resized.corners[0] == RulerPoint(x: -25, y: -25) && resized.corners[2] == RulerPoint(x: 125, y: 125))
+    assert(hypot(resized.corners[0].x + 25, resized.corners[0].y + 25) < 1e-8 && hypot(resized.corners[2].x - 125, resized.corners[2].y - 125) < 1e-8)
     let constrained = settings.editing(.corner(0), delta: CGPoint(x: -10, y: -30), screenSpace: true)!
-    assert(constrained.corners[0] == RulerPoint(x: 0, y: -30))
+    let oldFrame = settings.ellipseEditFrame(), constrainedFrame = constrained.ellipseEditFrame()
+    assert(hypot(constrainedFrame[0].x - oldFrame[0].x, constrainedFrame[0].y - oldFrame[0].y + 30) < 1e-8)
+    var nearHorizon = RulerSettings(); nearHorizon.kind = .perspectiveEllipse; nearHorizon.circleRadius = 2.2
+    nearHorizon.corners = [RulerPoint(x: 0, y: 0), RulerPoint(x: 50, y: 0), RulerPoint(x: 100 / 3, y: 100 / 3), RulerPoint(x: 0, y: 50)]
+    try nearHorizon.validate()
+    let finiteFrame = RulerPlane(nearHorizon.ellipseEditFrame())!
+    for point in RulerGeometry.projectedCircle(nearHorizon.corners, radius: 2.2)! {
+        let unit = finiteFrame.unit(point)!
+        assert((0...1).contains(unit.x) && (0...1).contains(unit.y), "Near-horizon circles need a finite enclosing deformation frame")
+    }
     settings.ellipsePlaneStep = .nan
     do { try settings.validate(); assertionFailure("Invalid plane step accepted") } catch {}
-    print("Ellipse depth: independent 3D section oracle, finite/infinite scene matching, in-plane guards, cylinder/cone double-tangent oracle, snapping/bypass, baking, axial scaling and JSON passed.")
+    print("Ellipse depth: independent 3D section oracle, finite/infinite scene matching, in-plane guards, cylinder/cone double-tangent oracle, snapping/bypass, depth-preserving plane/global edits, enclosing deformation frames, axial scaling and JSON passed.")
 }
 
 func checkCameraInclinesAndPlanes() throws {
@@ -826,7 +856,42 @@ func checkNewRulerConstructions() throws {
     print("New rulers: bounded/extended blend, collapsed endpoints, fixed/anchored parallel branches and magnetic ticks, retained chain attachments/reset, rotated thin ellipse, stroke-locked rings, radial snapping, handles and JSON passed.")
 }
 
+func checkRulerStartAcquisition() {
+    var mapping = DriverSettings(); mapping.preserveAspect = false
+    let bounds = CGRect(x: -3440, y: 0, width: 3440, height: 1440)
+    func mapped(_ dx: Int, _ dy: Int) -> CGPoint {
+        mapping.location(x: 10000 + dx, y: 10000 + dy, bounds: bounds, tabletSize: SupportedTablet.medium.penSize)
+    }
+    let origin = mapped(0, 0)
+    let trace = [(1, 1), (-1, 2), (3, 1), (8, 3), (16, -2), (32, 2), (64, -1), (96, 1), (144, 0), (200, 0), (240, 0)]
+    for kind in [RulerKind.isometric, .perspective, .vanishing] {
+        for accuracy in [0.0, 0.5, 1.0] {
+            var settings = RulerSettings(); settings.enabled = true; settings.kind = kind; settings.accuracy = accuracy
+            settings.isometricAngles = [0, 90, 45]
+            settings.vanishingPoints = [RulerPoint(x: origin.x + 10000, y: origin.y), RulerPoint(x: origin.x, y: origin.y + 10000)]
+            var projection = RulerProjection(); projection.configure(settings)
+            assert(projection.process(origin, settings: settings) == origin)
+            for (dx, dy) in trace {
+                let input = mapped(dx, dy), output = projection.process(input, settings: settings)
+                if accuracy == 0 { assert(output == input, "Zero accuracy must retain exact bypass") }
+                else if projection.selectedFamily == nil {
+                    let expected = CGPoint(x: input.x + (origin.x - input.x) * accuracy, y: input.y + (origin.y - input.y) * accuracy)
+                    assert(hypot(output.x - expected.x, output.y - expected.y) < 1e-8, "Unacquired ruler motion must blend toward the stroke origin, not leak raw startup wiggles")
+                } else {
+                    assert(projection.selectedFamily == 0)
+                    assert(abs(output.y - (input.y + (origin.y - input.y) * accuracy)) < 1e-8)
+                }
+            }
+            if accuracy > 0 { assert(projection.selectedFamily == 0, "Clear mapped movement must still acquire the intended axis") }
+            projection.finishStroke(settings: settings)
+            assert(projection.anchor == nil && projection.selectedFamily == nil)
+        }
+    }
+    print("Ruler starts: noisy Medium-tablet/wide-display acquisition stays at the origin at full accuracy, blends at partial accuracy, bypasses exactly at zero, then locks and clears on lift for all ordinary axis families.")
+}
+
 func checkRulers() throws {
+    checkRulerStartAcquisition()
     try checkNewRulerConstructions()
     try checkRulerPickerShortcut()
     try checkPriorityRulerPipeline()
@@ -870,7 +935,9 @@ func checkRulers() throws {
     _ = closeProjection.process(CGPoint(x: 2.1, y: 0), settings: close)
     let intended = CGPoint(x: 20, y: 3.52)
     let acquired = closeProjection.process(intended, settings: close)
-    assert(hypot(acquired.x - intended.x, acquired.y - intended.y) < 0.01, "Initial wobble must not lock a nearby perspective family")
+    assert(acquired == .zero && closeProjection.selectedFamily == nil, "Initial wobble must neither lock a nearby family nor ink an unselected path")
+    let confirmed = closeProjection.process(CGPoint(x: 24, y: 4.224), settings: close)
+    assert(closeProjection.selectedFamily == 1 && hypot(confirmed.x - 24, confirmed.y - 4.224) < 0.01)
     closeProjection.reset()
     close.family = 2
     _ = closeProjection.process(.zero, settings: close)
@@ -892,7 +959,7 @@ func checkRulers() throws {
     var projection = RulerProjection(); projection.configure(config)
     assert(projection.process(.zero, settings: config) == .zero)
     // A single first report must not lock the wrong axis after touch-down wobble.
-    assert(projection.process(CGPoint(x: 8, y: 0), settings: config) == CGPoint(x: 8, y: 0))
+    assert(projection.process(CGPoint(x: 8, y: 0), settings: config) == .zero && projection.selectedFamily == nil)
     _ = projection.process(CGPoint(x: 1, y: 10), settings: config)
     assert(projection.process(CGPoint(x: 1, y: 15), settings: config).x < 1e-8)
     projection.reset()

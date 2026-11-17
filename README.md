@@ -309,28 +309,29 @@ move the reference or reduce the unit distance. Calibration is relative to that
 reference, not a recovered physical scene scale. Turning the option off restores
 the original screen-spaced ticks.
 
-For perspective ellipses, the **circle handle** cycles fixed, cursor-concentric and stepped sizing. Concentric size locks at pen-down until lift. The **resize-arrows handle** adjusts radius within the plane. Center/edge handles preserve the projected plane;
-**Shift-drag** snaps plane movement to steps, resizes the quad from corners, and
-moves opposite edges symmetrically. **Option-drag** moves centers/edges in screen
-space or constrains a corner along an adjacent edge. Enable the editing grid to
-see the plane steps. Snapping and guides share the same
-bounded 512-segment projected circle, centered in the world plane rather than at
-the ellipse's screen bounding-box center.
-For small or thin ellipses, Control-editing handles sit outside the ellipse with
-a clear gap. Their targets and drag behavior remain the same, including near
-screen edges and when a small circle sits inside a larger construction plane.
+For perspective ellipses, choose fixed, cursor-concentric or stepped sizing on
+the Rulers page. Concentric size locks at pen-down until lift. The on-canvas
+radius handle adjusts circle size. The red deformation frame encloses the circle;
+four nearby numbered corners shape its perspective. Move and rotate handles
+position it without a second global resize control. **Shift-drag** snaps movement
+or resizes symmetrically; **Option-drag** moves in screen space or constrains a
+corner along an adjacent edge. Enable the editing grid to see the plane steps.
+Snapping and guides share the same bounded 512-segment projected circle.
+For small or thin ellipses, handles move outward to keep the curves visible and
+remain separated near screen edges.
 
-Enable **Depth sections** to define a third vanishing point directly or from two
-scene lines. Camera-generated circle planes also prepare their normal direction.
-While holding Control, the **layers handle** toggles depth, **vertical arrows**
-slide along it, and **resize arrows** change the top section scale for a cone.
-Click the depth arrows for the next section; Shift-click goes back. Shift-drag
-snaps depth/radius to their configured steps. Reference and top circles share
-projective geometry, with cylinder/cone tangent guides where visible. A separate
-**Depth and tangents** color controls those guides. Plane edits bake the current
-section as the new reference; numeric depth offset zero restores the reference
-until then. Directions in the reference plane and camera-plane crossings are
-rejected. Depth units are locally calibrated screen points, not physical lengths.
+Enable **Depth sections** on the Rulers page and define a third vanishing point
+directly or from two scene lines. Camera-generated planes also prepare their
+normal direction. On-canvas **vertical arrows** slide the section along depth;
+the **cone handle** changes its scale. Click the depth arrows for the next
+section; Shift-click goes back. Shift-drag snaps depth/radius to configured steps.
+Moving, rotating or deforming the circle preserves cylinder/cone depth. Reference
+and top circles share projective geometry, with tangent guides where visible.
+Overlapping sections can have no visible side tangents while retaining depth.
+A separate **Depth and tangents** color controls these guides. Numeric depth zero
+returns to the reference section. Directions in the reference plane and
+camera-plane crossings are rejected. Depth units are locally calibrated screen
+points, not physical lengths.
 
 **Rulers → Guideline colors** provides a native color picker for each guideline
 or direction family. Overrides are saved separately per ruler; reset one color

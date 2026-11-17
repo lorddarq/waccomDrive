@@ -210,11 +210,15 @@ struct RulerSettingsView: View {
                         number("Depth step (points)", value: $model.draft.rulerSettings.depthSettings.step)
                         number("Top section scale", value: $model.draft.rulerSettings.depthSettings.scale)
                         Toggle("Cylinder/cone tangent guides", isOn: $model.draft.rulerSettings.depthSettings.tangents)
+                        if model.draft.rulerSettings.depthSettings.tangents, model.draft.rulerSettings.depthSettings.offset != 0,
+                           model.draft.rulerSettings.depthTangents(radius: model.draft.rulerSettings.sectionRadius).isEmpty {
+                            Text("These sections overlap in this view, so no side tangents are visible. The depth is preserved.").font(.caption).foregroundStyle(.secondary)
+                        }
                         Button("Return to reference section") { model.draft.rulerSettings.depthSettings.offset = 0; model.draft.rulerSettings.depthSettings.scale = 1 }
-                        Text("Hold Control: layers toggles depth; arrows drag along depth or click for the next section (Shift-click for previous); resize changes top scale; line switches direct point/scene pairs. Tangents join the reference and top circles when visible. Plane edits make the current section the new reference.").font(.caption).foregroundStyle(.secondary)
+                        Text("Hold Control: the depth arrows slide the section or click for the next step (Shift-click for previous); the cone handle changes top scale. Move and deformation edits preserve the reference section and cylinder/cone. Depth setup stays on this page.").font(.caption).foregroundStyle(.secondary)
                     }
                     Text("Center and edge handles move in the projected plane. Shift snaps movement to plane steps, resizes corners, and moves opposite edges symmetrically. Option moves centers/edges in screen space or constrains a corner to an adjacent edge. Shift also snaps depth and radius. Concentric size locks at pen-down until lift.").font(.caption).foregroundStyle(.secondary)
-                    Text("Four corners in clockwise or counterclockwise order. The guide is the projected circle inscribed in this rectangle.").font(.caption).foregroundStyle(.secondary)
+                    Text("The colored deformation frame encloses the displayed circle. Drag its four numbered corners to reshape the perspective; the nearby size handle changes circle radius. Rotation and center handles move the construction. Numeric corners below define the underlying reference plane.").font(.caption).foregroundStyle(.secondary)
                     Text("On small or thin ellipses, editing handles sit outside the guide to keep it visible.").font(.caption).foregroundStyle(.secondary)
                     ForEach(0..<4, id: \.self) { i in
                         number("Corner \(i + 1) X", value: $model.draft.rulerSettings.corners[i].x)

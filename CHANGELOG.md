@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.1.6 — 2026-11-18
+
+- Simplify perspective-circle editing to move, rotate, four deformation corners and radius, plus depth and cone scale when enabled. Remove the redundant global resize handle from ruler overlays; keep configuration on the Rulers page.
+- Enclose the perspective circle with its deformation frame and keep corner controls nearby with collision clearance.
+- Preserve cylinder/cone depth when moving, rotating, resizing or deforming the perspective circle; explain views with no visible side tangents.
+- Recover Control-editing and picker shortcuts after missed key releases or disabled event listeners.
+- Preserve small ordinary ellipse dimensions when releasing Control after resizing.
+
+**Verification:** app/CLI builds, geometry and JSON self-checks, native overlay/picker checks, input-thread checks and captured-input replays passed. Includes the 0.1.5 stroke-start correction.
+
+## 0.1.5 — 2026-11-17
+
+- Fix wiggly stroke starts while automatic isometric, perspective or vanishing-line rulers acquire a direction. At 100% accuracy, the stroke stays at its pen-down point until an axis locks instead of drawing unprojected startup motion.
+- Preserve partial-accuracy blending, exact zero-accuracy bypass, manual axis selection and existing acquisition calibration. Saved tablet mapping and proportions are unchanged.
+- Add noisy Medium-tablet/wide-display regression traces across all three axis families and 0/50/100% accuracy, with family-lock and lift-cleanup checks.
+
+**Distribution status:** Developer ID-signed installer built; notarization is pending because Apple returned HTTP 401 for the saved WaccomDrive profile.
+
+**Verification:** automated app/CLI builds, capture replays and input-thread checks cover the fix. Physical drawing acceptance on the owner's Medium/wide-monitor setup remains pending.
+
 ## 0.1.4 — 2026-11-17
 
 - Add an Advanced page with a shared **Advanced features** master switch, off by default; saved feature settings remain intact while bypassed.

@@ -412,8 +412,8 @@ final class AppModel: NSObject, ObservableObject {
     }
     func toggleRulerEditing() {
         rulerOverlay.finishPicker(nil)
-        guard !withSession({ $0.output.isContact }) else { message = "Lift the pen before editing rulers."; return }
-        guard saved.advancedFeaturesEnabled, saved.rulerSettings.enabled else { return }
+        guard rulerEditing || !withSession({ $0.output.isContact }) else { message = "Lift the pen before editing rulers."; return }
+        guard rulerEditing || saved.advancedFeaturesEnabled && saved.rulerSettings.enabled else { return }
         rulerEditing.toggle()
         configureRulerInteraction()
         rulerOverlay.setEditing(rulerEditing) { [weak self] ruler in _ = self?.moveRuler(ruler) }

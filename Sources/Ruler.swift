@@ -407,6 +407,30 @@ struct RulerSettings: Codable, Equatable {
         guard winding(points) * winding(corners.map(\.cg)) > 0 else { return [] }
         return points.map { RulerPoint(x: $0.x, y: $0.y) }
     }
+    // Recover depth after an edit without collapsing the two parallel sections.
+    private func depthOffset(matching section: [RulerPoint]) -> Double? {
+        guard section.count == 4, let plane = RulerPlane(corners), let v = depthVector else { return nil }
+        let units = [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)]
+        var strongest = 0.0, offset: Double?
+        for (unit, point) in zip(units, section) {
+            let q = plane.homogeneous(unit)
+            for (numerator, denominator) in [(q.x - point.x * q.z, point.x * v.z - v.x), (q.y - point.y * q.z, point.y * v.z - v.y)] {
+                if abs(denominator) > strongest { strongest = abs(denominator); offset = numerator / denominator }
+            }
+        }
+        return strongest > 1e-9 && offset?.isFinite == true ? offset : nil
+    }
+    func ellipseEditFrame(radius: Double? = nil) -> [RulerPoint] {
+        let radius = radius ?? sectionRadius
+        if let frame = RulerPlane(sectionCorners)?.rectangle(x: 0.5 - radius * 0.56, y: 0.5 - radius * 0.56,
+                                                            width: radius * 1.12, height: radius * 1.12) { return frame }
+        // A circle can be visible even when its plane's expanded rectangle crosses
+        // the horizon. Keep a finite enclosing frame and use the same projective edit.
+        let bounds = (RulerGeometry.projectedCircle(sectionCorners, radius: radius) ?? []).reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) }.insetBy(dx: -12, dy: -12)
+        guard !bounds.isNull else { return sectionCorners }
+        return [RulerPoint(x: bounds.minX, y: bounds.minY), RulerPoint(x: bounds.maxX, y: bounds.minY),
+                RulerPoint(x: bounds.maxX, y: bounds.maxY), RulerPoint(x: bounds.minX, y: bounds.maxY)]
+    }
     mutating func enableDepth(_ enabled: Bool) {
         depthSettings.enabled = enabled
         if enabled, depthVector == nil, let center = RulerPlane(corners)?.screen(CGPoint(x: 0.5, y: 0.5)) {
@@ -1020,12 +1044,16 @@ struct RulerProjection {
                     }
                 }
             }
-            guard let selected else { return point }
-            if settings.kind == .radial {
-                let radial = RulerGeometry.nearestRadial(point, center: settings.center, direction: selected, bend: settings.radialSettings.bend, previous: radialParameter)
-                radialParameter = radial.parameter
-                projected = radial.point
-            } else { projected = RulerGeometry.line(point, origin: start, direction: selected) }
+            if let selected {
+                if settings.kind == .radial {
+                    let radial = RulerGeometry.nearestRadial(point, center: settings.center, direction: selected, bend: settings.radialSettings.bend, previous: radialParameter)
+                    radialParameter = radial.parameter
+                    projected = radial.point
+                } else { projected = RulerGeometry.line(point, origin: start, direction: selected) }
+            } else {
+                // Acquisition must not ink raw jitter before the axis locks.
+                projected = start
+            }
         }
         let accuracy = connectEndpoint ? 1 : settings.accuracy
         return CGPoint(x: point.x + (projected.x - point.x) * accuracy,
@@ -1261,7 +1289,7 @@ extension RulerSettings {
             for i in 0..<4 {
                 let quad = sectionCorners
                 guard quad.count == 4 else { continue }
-                result.append((.corner(i), quad[i].cg))
+                result.append((.corner(i), ellipseEditFrame()[i].cg))
                 let next = quad[(i + 1) % 4]
                 result.append((.edge(i), CGPoint(x: (quad[i].x + next.x) / 2, y: (quad[i].y + next.y) / 2)))
             }
@@ -1283,6 +1311,8 @@ extension RulerSettings {
         let radius: Double
         switch kind {
         case .radial, .isometric: radius = 80
+        case .perspectiveEllipse:
+            radius = max(80, (ellipseEditFrame().map { hypot($0.x - pivot.x, $0.y - pivot.y) }.max() ?? 80) + 48)
         default:
             let extent = result.map { Double(hypot($0.point.x - pivot.x, $0.point.y - pivot.y)) }.max() ?? 80
             radius = max(80, min(50000, extent + 48))
@@ -1299,9 +1329,22 @@ extension RulerSettings {
         guard delta.x.isFinite, delta.y.isFinite else { return nil }
         if kind == .perspectiveEllipse, depthSettings.enabled, depthSettings.offset != 0 {
             switch handle {
-            case .move, .rotate, .size, .corner, .edge:
+            case .corner, .edge:
+                guard let v = depthVector else { return nil }
                 var baked = self; baked.corners = sectionCorners; baked.depthSettings.offset = 0; baked.circleRadius = sectionRadius; baked.depthSettings.scale = 1
-                return baked.editing(handle, delta: delta, screenSpace: screenSpace, referenceOrigin: referenceOrigin, snap: snap)
+                guard let edited = baked.editing(handle, delta: delta, screenSpace: screenSpace, referenceOrigin: referenceOrigin, snap: snap),
+                      let plane = RulerPlane(edited.corners) else { return nil }
+                var restored = self
+                let units = [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)]
+                let factor = 1 + v.z * depthSettings.offset
+                restored.corners = units.compactMap { unit in
+                    let q = plane.homogeneous(unit) * factor - v * depthSettings.offset
+                    guard q.z > 1e-8 else { return nil }
+                    return RulerPoint(x: q.x / q.z, y: q.y / q.z)
+                }
+                guard let offset = restored.depthOffset(matching: edited.corners) else { return nil }
+                restored.depthSettings.offset = offset
+                return (try? restored.validate()) != nil ? restored : nil
             default: break
             }
         }
@@ -1326,12 +1369,27 @@ extension RulerSettings {
             case .perspective where camera != nil: next.centerX += delta.x; next.centerY += delta.y
             case .radial, .isometric: next.centerX += delta.x; next.centerY += delta.y
             case .perspectiveEllipse:
-                if screenSpace { next.corners = corners.map(move) }
-                else {
-                    guard let plane = RulerPlane(corners),
-                          let target = plane.unit(CGPoint(x: pivot.x + delta.x, y: pivot.y + delta.y)),
-                          let moved = plane.rectangle(x: quantized(target.x - 0.5, step: planeStep), y: quantized(target.y - 0.5, step: planeStep)) else { return nil }
+                let section: [RulerPoint]
+                if screenSpace {
+                    next.corners = corners.map(move)
+                    if ellipseDepth != nil {
+                        next.depthSettings.vanishingPoint = move(depthSettings.vanishingPoint)
+                        next.depthSettings.sceneLines = depthSettings.sceneLines?.map(move)
+                    }
+                    section = sectionCorners.map(move)
+                } else {
+                    guard let plane = RulerPlane(corners), let topPlane = RulerPlane(sectionCorners),
+                          let target = topPlane.unit(CGPoint(x: pivot.x + delta.x, y: pivot.y + delta.y)) else { return nil }
+                    let tx = quantized(target.x - 0.5, step: planeStep), ty = quantized(target.y - 0.5, step: planeStep)
+                    guard let moved = plane.rectangle(x: tx, y: ty) else { return nil }
                     next.corners = moved
+                    section = [CGPoint.zero, CGPoint(x: 1, y: 0), CGPoint(x: 1, y: 1), CGPoint(x: 0, y: 1)].compactMap { unit in
+                        sectionPoint(CGPoint(x: unit.x + tx, y: unit.y + ty), offset: depthSettings.offset).map { RulerPoint(x: $0.x, y: $0.y) }
+                    }
+                }
+                if depthSettings.enabled, depthSettings.offset != 0 {
+                    guard let offset = next.depthOffset(matching: section) else { return nil }
+                    next.depthSettings.offset = offset
                 }
             case .perspective, .vanishing:
                 next.vanishingPoints = vanishingPoints.map(move)
@@ -1347,20 +1405,27 @@ extension RulerSettings {
             else { next.constructionSettings.radiusY = abs(local.y) }
         case .corner(let index):
             guard kind == .perspectiveEllipse, corners.indices.contains(index) else { return nil }
-            let target = move(corners[index])
+            let frame = ellipseEditFrame()
+            guard let oldPlane = RulerPlane(frame) else { return nil }
+            var changed = frame
+            let target = move(frame[index])
             if snap, !screenSpace {
-                guard let plane = RulerPlane(corners), let unit = plane.unit(target.cg) else { return nil }
+                guard let plane = RulerPlane(frame), let unit = plane.unit(target.cg) else { return nil }
                 let width = quantized((unit.x - 0.5) * (index == 0 || index == 3 ? -2 : 2), step: planeStep)
                 let height = quantized((unit.y - 0.5) * (index < 2 ? -2 : 2), step: planeStep)
                 guard let resized = plane.rectangle(x: 0.5 - width / 2, y: 0.5 - height / 2, width: width, height: height) else { return nil }
-                next.corners = resized
+                changed = resized
             } else if screenSpace {
                 let candidates = [(index + 1) % 4, (index + 3) % 4].map { other in
-                    RulerGeometry.line(target.cg, origin: corners[index].cg, direction: CGPoint(x: corners[other].x - corners[index].x, y: corners[other].y - corners[index].y))
+                    RulerGeometry.line(target.cg, origin: frame[index].cg, direction: CGPoint(x: frame[other].x - frame[index].x, y: frame[other].y - frame[index].y))
                 }
                 let closest = candidates.min { hypot($0.x - target.x, $0.y - target.y) < hypot($1.x - target.x, $1.y - target.y) }!
-                next.corners[index] = RulerPoint(x: closest.x, y: closest.y)
-            } else { next.corners[index] = target }
+                changed[index] = RulerPoint(x: closest.x, y: closest.y)
+            } else { changed[index] = target }
+            guard let newPlane = RulerPlane(changed) else { return nil }
+            next.corners = corners.compactMap { point in
+                oldPlane.unit(point.cg).flatMap { newPlane.screen($0) }.map { RulerPoint(x: $0.x, y: $0.y) }
+            }
         case .edge(let index):
             guard kind == .perspectiveEllipse, corners.indices.contains(index) else { return nil }
             if screenSpace {
@@ -1546,7 +1611,16 @@ extension RulerSettings {
             case .perspective, .vanishing:
                 next.vanishingPoints = vanishingPoints.map(transform)
                 next.sceneLines = sceneLines?.map { $0.map(transform) }
-            case .perspectiveEllipse: next.corners = corners.map(transform)
+            case .perspectiveEllipse:
+                next.corners = corners.map(transform)
+                if ellipseDepth != nil {
+                    next.depthSettings.vanishingPoint = transform(depthSettings.vanishingPoint)
+                    next.depthSettings.sceneLines = depthSettings.sceneLines?.map(transform)
+                }
+                if depthSettings.enabled, depthSettings.offset != 0 {
+                    guard let offset = next.depthOffset(matching: sectionCorners.map(transform)) else { return nil }
+                    next.depthSettings.offset = offset
+                }
             }
         }
         return (try? next.validate()) != nil ? next : nil

@@ -98,16 +98,19 @@ private final class RulerProbe {
         overlay.setEditing(true) { [weak self] value in self?.commits += 1; self?.settings = value }
         checkSymbols()
         let handles = NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }
-        assert(handles.count == 14)
-        assert(handles.contains { $0.contentView?.toolTip == "Resize ruler" })
-        assert(handles.contains { $0.contentView?.toolTip == "Edge 1" })
+        assert(handles.count == 7)
+        assert(!handles.contains { $0.contentView?.toolTip == "Resize ruler" || $0.title.contains("Edge ") })
+        assert(handles.filter { $0.title.contains("Corner ") }.count == 4)
         let old = settings!
-        let collapse = CGPoint(x: old.corners[2].x - old.corners[0].x, y: old.corners[2].y - old.corners[0].y)
+        let frame = old.ellipseEditFrame()
+        let collapse = CGPoint(x: frame[2].x - frame[0].x, y: frame[2].y - frame[0].y)
         overlay.updateDrag(.corner(0), delta: collapse, finished: false)
         overlay.updateDrag(.corner(0), delta: collapse, finished: true)
         assert(settings == old && commits == 1, "Invalid drag must neither preview invalid geometry nor commit")
-        overlay.updateDrag(.ellipseDepthMode, delta: .zero, finished: true)
+        settings!.enableDepth(true)
+        overlay.setEditing(true) { [weak self] in self?.settings = $0 }
         assert(settings!.depthSettings.enabled)
+        assert(NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }.count == 9)
         checkSymbols()
         overlay.updateDrag(.ellipseDepth, delta: CGPoint(x: 0, y: 30), finished: false)
         assert(settings!.depthSettings.offset == 0, "Depth preview must not commit")
@@ -115,8 +118,10 @@ private final class RulerProbe {
         assert(settings!.depthSettings.offset != 0 && settings!.corners == old.corners)
         overlay.updateDrag(.ellipseScale, delta: CGPoint(x: 30, y: 0), finished: true)
         assert(settings!.depthSettings.scale > 1)
-        overlay.updateDrag(.ellipseSceneMode, delta: .zero, finished: true)
+        settings!.matchDepthScene(true)
+        overlay.setEditing(true) { [weak self] in self?.settings = $0 }
         assert(settings!.depthSettings.sceneLines?.count == 4)
+        assert(NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }.count == 9)
         checkSymbols()
         let layers = NSApp.windows.filter { $0.title == "Ruler guide" && $0.isVisible }
             .flatMap { $0.contentView!.layer!.sublayers!.compactMap { $0 as? CAShapeLayer } }
@@ -132,7 +137,7 @@ private final class RulerProbe {
         overlay.setEditing(true) { _ in }
         checkSymbols()
         let handles = NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }
-        assert(handles.count == 10)
+        assert(handles.count == 9)
         for i in handles.indices {
             for j in handles.indices where j > i {
                 assert(hypot(handles[i].frame.midX - handles[j].frame.midX, handles[i].frame.midY - handles[j].frame.midY) >= 36,
@@ -140,6 +145,7 @@ private final class RulerProbe {
             }
         }
         overlay.setEditing(false) { _ in }
+        overlay.updateModifier(false, pointerHeld: false)
         var contact = true
         overlay.isContact = { contact }
         overlay.onToggleEditing = { [weak self] in
@@ -160,7 +166,7 @@ private final class RulerProbe {
         overlay.setEditing(true) { [weak self] in self?.settings = $0 }
         checkSymbols()
         let cameraHandles = NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }
-        assert(cameraHandles.count == 12)
+        assert(cameraHandles.count == 11)
         assert(cameraHandles.contains { $0.contentView?.toolTip == "Camera field of view" })
         overlay.updateDrag(.cameraMode, delta: .zero, finished: false)
         overlay.updateDrag(.cameraMode, delta: .zero, finished: true)
@@ -228,7 +234,7 @@ private final class RulerProbe {
         settings!.kind = .vanishing
         settings!.matchScene(true)
         overlay.setEditing(true) { [weak self] in self?.settings = $0 }
-        assert(NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }.count == 19)
+        assert(NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }.count == 18)
         overlay.updateDrag(.sceneMode, delta: .zero, finished: true)
         assert(settings!.sceneLines == nil)
         overlay.updateDrag(.horizon, delta: .zero, finished: true)
@@ -286,9 +292,12 @@ private final class RulerProbe {
             assert(layers.count == 3 && layers.allSatisfy { $0.path!.boundingBoxOfPath.width < 1000 }, "Bounded box must replace infinite axes with the shared wireframe")
         }
         overlay.setEditing(false) { _ in }
+        checkEditRecovery()
         checkKeyboardEditing()
         checkCompactEllipseHandles()
         checkNewFamilies()
+        checkPerspectiveLayout()
+        checkEllipseResizeExit()
         checkPicker()
         settings = nil
         Timer.scheduledTimer(withTimeInterval: 0.2, repeats: false) { [weak self] _ in
@@ -299,6 +308,83 @@ private final class RulerProbe {
                 NSApp.terminate(nil)
             }
         }
+    }
+    func checkPerspectiveLayout() {
+        let screen = NSScreen.screens.first!.visibleFrame, top = NSScreen.screens.first!.frame.maxY
+        let x = screen.midX, y = top - screen.midY
+        settings = RulerSettings(); settings!.kind = .perspectiveEllipse; settings!.enabled = true; settings!.opacity = 0.85
+        settings!.corners = [RulerPoint(x: x - 150, y: y - 90), RulerPoint(x: x + 130, y: y - 120),
+                            RulerPoint(x: x + 160, y: y + 90), RulerPoint(x: x - 110, y: y + 110)]
+        settings!.circleRadius = 1.6; settings!.enableDepth(true); settings!.depthSettings.offset = 90
+        settings!.depthSettings.vanishingPoint = RulerPoint(x: x + 400, y: y - 700)
+        overlay.setEditing(true) { [weak self] in self?.settings = $0 }
+        checkSymbols()
+        let handles = NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }
+        assert(handles.count == 9)
+        assert(!handles.contains { $0.title.contains("Resize ruler") || $0.title.contains("Edge ") || $0.title.contains("vanishing point") })
+        let frame = settings!.ellipseEditFrame()
+        for i in 0..<4 {
+            let panel = handles.first { $0.title == "Ruler handle · Corner \(i + 1)" }!
+            let point = CGPoint(x: frame[i].x, y: top - frame[i].y)
+            assert(hypot(panel.frame.midX - point.x, panel.frame.midY - point.y) <= 70, "Deformation handles must stay near their own frame corners, allowing clearance from the reference circle")
+        }
+        for i in handles.indices { for j in handles.indices where j > i {
+            assert(hypot(handles[i].frame.midX - handles[j].frame.midX, handles[i].frame.midY - handles[j].frame.midY) >= 36)
+        } }
+        let crop = handles.reduce(CGRect.null) { $0.union($1.frame) }.insetBy(dx: -36, dy: -36).integral
+        let bitmap = CGContext(data: nil, width: Int(crop.width), height: Int(crop.height), bitsPerComponent: 8, bytesPerRow: 0,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        bitmap.setFillColor(NSColor.white.cgColor); bitmap.fill(CGRect(origin: .zero, size: crop.size))
+        let panels = NSApp.windows.filter { ($0.title == "Ruler guide" || $0.title.hasPrefix("Ruler handle")) && $0.isVisible }
+        for panel in panels.sorted(by: { $0.title == "Ruler guide" && $1.title != "Ruler guide" }) {
+            panel.displayIfNeeded(); bitmap.saveGState()
+            bitmap.translateBy(x: panel.frame.minX - crop.minX, y: panel.frame.minY - crop.minY)
+            panel.contentView!.layer!.render(in: bitmap); bitmap.restoreGState()
+        }
+        let rep = NSBitmapImageRep(cgImage: bitmap.makeImage()!)
+        try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: "build/perspective-controls-preview.png"))
+        overlay.setEditing(false) { _ in }
+        print("Perspective controls: nine distinct depth-enabled handles, nearby frame corners, no duplicate global resize/edge/calibration handles and collision separation passed.")
+    }
+    func checkEllipseResizeExit() {
+        let cursor = NSEvent.mouseLocation, top = NSScreen.screens.first!.frame.maxY
+        func guideBounds() -> CGRect {
+            let panel = NSApp.windows.first { $0.title == "Ruler guide" && $0.isVisible }!
+            return (panel.contentView!.layer!.sublayers!.first as! CAShapeLayer).path!.boundingBoxOfPath
+        }
+        for mode in RulerEllipseMode.allCases {
+            for radius in [160.0, 40, 10] {
+                settings = RulerSettings(); settings!.enabled = true; settings!.kind = .ellipse
+                settings!.centerX = cursor.x + 200; settings!.centerY = top - cursor.y + 200; settings!.angle = 0
+                settings!.constructionSettings.radiusX = radius; settings!.constructionSettings.radiusY = radius
+                settings!.constructionSettings.sizing = mode
+                overlay.setEditing(true) { [weak self] in self?.settings = $0 }
+                overlay.updateDrag(.corner(0), delta: CGPoint(x: -radius / 2, y: 0), finished: true)
+                overlay.updateDrag(.corner(1), delta: CGPoint(x: 0, y: -radius / 2), finished: true)
+                let saved = settings!, edited = guideBounds()
+                assert(abs(edited.width - radius) < 1e-6 && abs(edited.height - radius) < 1e-6)
+                overlay.setEditing(false) { _ in }
+                let released = guideBounds()
+                assert(settings == saved)
+                assert(abs(released.width - edited.width) < 1e-6 && abs(released.height - edited.height) < 1e-6, "Releasing Control must preserve the resized ellipse, independent of cursor/proxy handle position")
+            }
+        }
+        let saved = settings!, lifted = guideBounds()
+        let down = CGPoint(x: saved.centerX + saved.constructionSettings.radiusX * 2, y: saved.centerY)
+        var contact = true
+        overlay.isContact = { contact }; overlay.contactAnchor = { down }
+        overlay.setEditing(false) { _ in }
+        assert(abs(guideBounds().width - lifted.width * 2) < 1e-6, "Guide-only concentric strokes must still size from pen-down")
+        var snapping = saved; snapping.accuracy = 1
+        var projection = RulerProjection(); projection.configure(snapping)
+        _ = projection.process(down, settings: snapping)
+        settings = projection.guideSettings(snapping)
+        overlay.setEditing(false) { _ in }
+        assert(abs(guideBounds().width - lifted.width * 2) < 1e-6, "A stroke-locked snapshot must not be scaled twice")
+        contact = false; settings = saved
+        overlay.setEditing(false) { _ in }
+        assert(abs(guideBounds().width - lifted.width) < 1e-6)
+        print("Ellipse resize exit: fixed/concentric/stepped guides retain edited dimensions across compact-handle thresholds; guide-only and snapped pen-down sizing remain correct.")
     }
     func checkNewFamilies() {
         for kind in [RulerKind.straight, .parallel, .connected, .ellipse] {
@@ -377,11 +463,13 @@ private final class RulerProbe {
         overlay.onTogglePicker = { [weak self] in self?.pickerInvocations += 1 }
         assert(overlay.keyboardEvent(key: shortcut.keyCode, flags: CGEventFlags(rawValue: shortcut.modifiers), down: true, ownApp: false))
         assert(overlay.keyboardEvent(key: shortcut.keyCode, flags: CGEventFlags(rawValue: shortcut.modifiers), down: true, ownApp: false, repeatKey: true))
+        // A fresh physical down must recover even if the previous key-up was lost.
+        assert(overlay.keyboardEvent(key: shortcut.keyCode, flags: CGEventFlags(rawValue: shortcut.modifiers), down: true, ownApp: false))
         assert(overlay.keyboardEvent(key: shortcut.keyCode, flags: [], down: false, ownApp: false))
         assert(!overlay.keyboardEvent(key: shortcut.keyCode, flags: CGEventFlags(rawValue: shortcut.modifiers), down: true, ownApp: true), "Recorder must receive the binding in driver settings")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            assert(self.pickerInvocations == 1, "Shortcut repeats must not reopen/toggle the picker")
+            assert(self.pickerInvocations == 2, "Ignore autorepeat, but recover a fresh shortcut after a missed key-up")
             self.overlay.pickerShortcut = nil; self.overlay.onTogglePicker = nil
         }
         print("Ruler picker: semicircle/display-edge/negative-origin layout, hit testing, symbols, non-key panel, keyboard navigation, pointer capture/cleanup and shortcut repeat/focus guards passed. No events posted.")
@@ -405,13 +493,16 @@ private final class RulerProbe {
                 checkSymbols()
                 let panels = NSApp.windows.filter { $0.title.hasPrefix("Ruler handle") && $0.isVisible }
                 let sections = [(settings!.sectionCorners, settings!.sectionRadius), (settings!.corners, settings!.circleRadius)]
-                let guides = sections.map { corners, radius in
-                    RulerGeometry.projectedCircle(corners, radius: radius)!.reduce(CGRect.null) { rect, point in
-                        rect.union(CGRect(origin: CGPoint(x: point.x, y: top - point.y), size: .zero))
-                    }
+                let curves = sections.map { corners, radius in
+                    RulerGeometry.projectedCircle(corners, radius: radius)!.map { CGPoint(x: $0.x, y: top - $0.y) }
                 }
+                let guides = curves.map { $0.reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) } }
                 for panel in panels {
-                    assert(guides.allSatisfy { !panel.frame.intersects($0.insetBy(dx: -4, dy: -4)) }, "Compact ellipse is obscured by \(panel.title)")
+                    if panel.title.contains("Corner ") {
+                        assert(curves.allSatisfy { !$0.contains { panel.frame.insetBy(dx: -4, dy: -4).contains($0) } }, "A corner target must not obscure the actual ellipse")
+                    } else {
+                        assert(guides.allSatisfy { !panel.frame.intersects($0.insetBy(dx: -4, dy: -4)) }, "Compact ellipse is obscured by \(panel.title)")
+                    }
                     assert(NSScreen.screens.contains { $0.visibleFrame.contains(panel.frame) }, "Handle must stay on a usable display")
                 }
                 for i in panels.indices {
@@ -422,11 +513,43 @@ private final class RulerProbe {
                 assert(settings == original, "Proxy layout must not change ruler geometry")
                 overlay.updateDrag(.move, delta: CGPoint(x: 15, y: 10), finished: true)
                 let corner = original.sectionCorners[0]
-                assert(hypot(settings!.corners[0].x - corner.x - 15, settings!.corners[0].y - corner.y - 10) < 1e-7, "External move handle must preserve drag distance")
+                assert(hypot(settings!.sectionCorners[0].x - corner.x - 15, settings!.sectionCorners[0].y - corner.y - 10) < 1e-7, "External move handle must preserve drag distance")
                 overlay.setEditing(false) { _ in }
             }
         }
         print("Compact ellipse handles: small/thin guides stay clear, depth controls remain separated/on-screen, edge placement and proxy drag geometry passed.")
+    }
+    func checkEditRecovery() {
+        settings = RulerSettings(); settings!.enabled = true
+        var mode = false, allowTransition = true, contact = false
+        overlay.isContact = { contact }
+        overlay.onToggleEditing = { [weak self] in
+            guard let self, allowTransition else { return }
+            mode.toggle()
+            self.overlay.setEditing(mode) { self.settings = $0 }
+        }
+        overlay.updateModifier(true)
+        assert(mode)
+        let original = settings!
+        overlay.updateDrag(.move, delta: CGPoint(x: 15, y: 8), finished: false)
+        overlay.updateModifier(false, pointerHeld: true)
+        assert(mode, "A live drag retains editing until its pointer releases")
+        overlay.updateModifier(false, pointerHeld: false)
+        assert(!mode && settings == original, "Lost mouse-up must not trap Control editing or commit an unfinished preview")
+        overlay.updateModifier(true); assert(mode)
+        allowTransition = false
+        overlay.updateModifier(false); assert(mode)
+        allowTransition = true
+        overlay.updateModifier(false)
+        assert(!mode, "A rejected exit must retain modifier ownership and retry after the blocker clears")
+        overlay.updateModifier(true); assert(mode)
+        overlay.updateModifier(false); assert(!mode, "Control must remain responsive after recovery")
+        overlay.updateModifier(true); assert(mode)
+        contact = true
+        overlay.updateModifier(false)
+        assert(!mode, "Contact must not prevent ending an already active editing session")
+        contact = false
+        print("Edit recovery: orphan drag cancellation, rejected-exit retry and subsequent Control entry/release passed. No events posted.")
     }
     func checkKeyboardEditing() {
         settings = RulerSettings(); settings!.kind = .isometric; settings!.enabled = true
