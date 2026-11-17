@@ -8,6 +8,8 @@
 - Recover Control-editing and picker shortcuts after missed key releases or disabled event listeners.
 - Preserve small ordinary ellipse dimensions when releasing Control after resizing.
 
+**Distribution status:** Developer ID-signed installer, notarized by Apple with its ticket stapled. Staple validation and Gatekeeper installer assessment passed.
+
 **Verification:** app/CLI builds, geometry and JSON self-checks, native overlay/picker checks, input-thread checks and captured-input replays passed. Includes the 0.1.5 stroke-start correction.
 
 ## 0.1.5 — 2026-11-17
