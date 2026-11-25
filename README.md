@@ -24,17 +24,27 @@ A native macOS USB driver and settings app for the Wacom Intuos Pro Medium PTH-6
 
 ## Screenshots
 
-| Connection and battery | Display and tablet mapping |
+Screenshots from WaccomDrive 0.1.6. Connection status reflects the hardware available at capture time.
+
+| Connection and device status | Display and tablet mapping |
 | --- | --- |
-| ![Overview with wireless connection, battery status, and live pen input](previews/screenshots/overview.png) | ![Tablet active area and display mapping](previews/screenshots/mapping.png) |
+| ![Overview with driver version, receiver status, and live pen input](previews/screenshots/overview.png) | ![Tablet active area and display mapping](previews/screenshots/mapping.png) |
 
 | Pen pressure profiles | ExpressKey customization |
 | --- | --- |
-| ![Pen pressure profiles, sensitivity curve, and live response](previews/screenshots/pen.png) | ![ExpressKey assignments with highlighted tablet controls](previews/screenshots/expresskeys.png) |
+| ![Pen pressure curve, sensitivity controls, and live response](previews/screenshots/pen.png) | ![ExpressKey assignments with highlighted tablet controls](previews/screenshots/expresskeys.png) |
 
 | Touch and palm rejection | Settings and installation |
 | --- | --- |
 | ![Surface touch, tap to click, pointer speed, and palm rejection](previews/screenshots/touch.png) | ![Installation, startup, saved settings, and backup controls](previews/screenshots/settings.png) |
+
+| Advanced drawing settings | Advanced pressure editor |
+| --- | --- |
+| ![Advanced master and pulled-string stabilization settings](previews/screenshots/advanced.png) | ![Advanced pressure curve with editable anchors and precision sliders](previews/screenshots/advanced-pressure.png) |
+
+| Cross-app rulers | Complete local drawing profiles |
+| --- | --- |
+| ![Ruler selection, picker shortcut, snapping accuracy, and guide appearance](previews/screenshots/rulers.png) | ![Complete drawing profiles with update, duplicate, import, and export controls](previews/screenshots/profiles.png) |
 
 ## What works
 
